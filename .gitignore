@@ -20,3 +20,6 @@ Thumbs.db
 # Dev tools
 .claude/
 .superpowers/
+
+# Local data cache
+cache/
