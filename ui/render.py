@@ -1,4 +1,5 @@
 """Row rendering: turn view_rows output into <details> HTML with no JavaScript."""
+import base64
 import html
 
 import pandas as pd
@@ -120,6 +121,16 @@ def sparkline_svg(points: list[float], width: int = 64, height: int = 20,
             f'stroke-linejoin="round" stroke-linecap="round" points="{" ".join(coords)}"/></svg>')
 
 
+def _spark_img(svg: str, width: int = 64, height: int = 20) -> str:
+    """st.html strips inline <svg> (DOMPurify HTML profile), so embed it as an image."""
+    if not svg:
+        return ""
+    svg = svg.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ', 1)
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return (f'<img class="sm-spark" src="data:image/svg+xml;base64,{b64}" '
+            f'width="{width}" height="{height}" alt="">')
+
+
 def _tone(v) -> str:
     if _nan(v) or round(v, 1) == 0:
         return ""
@@ -142,11 +153,11 @@ def _row(r, view: str, market: str, session) -> str:
         if session is not None and not _nan(r["Low52Date"]):
             days = (pd.Timestamp(session).normalize() - pd.Timestamp(r["Low52Date"]).normalize()).days
             sub = f"{name} · low {days} days ago"
-        spark = sparkline_svg(spark_pts, color=MUTED)
+        spark = _spark_img(sparkline_svg(spark_pts, color=MUTED))
         key = f'<span class="sm-key sm-dn">{fmt_pct(r["FromHigh52"], signed=False)}</span>'
         right = f'<div class="sm-right sm-up">{fmt_pct(r["OffLow52"])}</div>'
     else:
-        spark = sparkline_svg(spark_pts[-config.SPARK_SHORT:])
+        spark = _spark_img(sparkline_svg(spark_pts[-config.SPARK_SHORT:]))
         col = "FromATH" if view == "ath" else "FromHigh52"
         key = f'<span class="sm-key">{fmt_pct(r[col], signed=False)}</span>'
         right = (f'<div class="sm-right">{e(fmt_price(r["Price"], market))}'

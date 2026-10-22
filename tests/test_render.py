@@ -83,3 +83,10 @@ def test_index_label_and_prices():
 
 def test_no_script():
     assert "<script" not in rows_html(_df(), "pth", "US", SESSION) + STYLES
+
+
+def test_rows_embed_sparkline_as_image():
+    # st.html sanitises with DOMPurify's HTML profile, which strips inline <svg>.
+    out = rows_html(_df(), "pth", "US", SESSION)
+    assert "<svg" not in out
+    assert '<img class="sm-spark" src="data:image/svg+xml;base64,' in out
