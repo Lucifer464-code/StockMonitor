@@ -114,7 +114,7 @@ usable = (md is not None and md.session is not None and md.universe > 0 and md.c
 
 with right:
     index_name = render.INDEX_LABEL[market]
-    options = [index_name, ALL] if md is not None and md.index_ok else [ALL]
+    options = [ALL, index_name] if md is not None and md.index_ok else [ALL]
     index_choice = st.selectbox("Index", options, key=f"index_{market}",
                                 label_visibility="collapsed")
 index_only = index_choice != ALL
