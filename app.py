@@ -41,7 +41,10 @@ html,body,.stApp{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif
 .st-key-market button p{font-size:14px}
 .st-key-controls [data-testid="stSelectbox"] [role="group"]{background:#fff !important;
   border:1px solid #e3e7ed !important;border-radius:10px !important}
-.st-key-controls [data-testid="stSelectbox"] input{background:transparent !important}
+.st-key-controls [data-testid="stSelectbox"] input{background:transparent !important;
+  caret-color:transparent !important}
+.st-key-controls [data-testid="stSelectbox"] [role="group"],
+.st-key-controls [data-testid="stSelectbox"] [role="group"] *{cursor:pointer !important}
 .st-key-tiles [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;gap:8px}
 .st-key-tiles [data-testid="stColumn"]{min-width:0 !important;width:auto !important;flex:1 1 0 !important}
 [class*="st-key-tile_"] button{width:100%;height:auto;min-height:0;display:block;text-align:left;
