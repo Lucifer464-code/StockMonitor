@@ -20,8 +20,8 @@ def _row(**kw):
 def _md(universe=100, priced=100, index="OK", label="Price as on Oct 16, 2026  (Close)",
         expected=None):
     """In the index: 48 PTH (31 of them also ATH) and 3 Fallen. Plus 5 PTH outside it."""
-    rows = [_row(Ticker=f"P{i}", IsPTH="TRUE", IsATH="TRUE" if i < 31 else "FALSE")
-            for i in range(48)]
+    rows = [_row(Ticker=f"P{i}", IsPTH="TRUE", IsATH="TRUE" if i < 31 else "FALSE",
+                 FromHigh52=str(-i / 10), R1W=str(i)) for i in range(48)]
     rows += [_row(Ticker=f"F{i}", IsFallen="TRUE") for i in range(3)]
     rows += [_row(Ticker=f"X{i}", IsPTH="TRUE", InIndex="FALSE") for i in range(5)]
     values = [
@@ -175,3 +175,60 @@ def test_tiles_in_order_with_current_rules(monkeypatch):
     labels = [b.label for b in at.button if (b.key or "").startswith("btn_")]
     assert [l.split("\n")[0] for l in labels] == ["Near 52w high", "Fallen from PTH", "All-time high"]
     assert "within 10%" in labels[0] and "down 10–20%" in labels[1] and "within 5%" in labels[2]
+
+
+# ── Sortable headers ─────────────────────────────────────────
+
+def _order(at, *tickers):
+    page = _page_html(at)
+    return [page.index(f"<b>{t}</b>") for t in tickers]
+
+
+def test_header_buttons_per_view(monkeypatch):
+    at = _run(monkeypatch)
+    keys = {b.key for b in at.button}
+    assert {"sort_pth_Ticker", "sort_pth_FromHigh52", "sort_pth_R1W"} <= keys
+    assert not any(k.startswith("sort_pth_") and "trend" in k.lower() for k in keys)
+    _tile(at, "fallen").click().run()
+    keys = {b.key for b in at.button}
+    assert {"sort_fallen_Ticker", "sort_fallen_FromHigh52", "sort_fallen_R1W",
+            "sort_fallen_R1M"} <= keys
+    assert at.button(key="sort_fallen_R1W").label.startswith("5D")
+    assert at.button(key="sort_fallen_R1M").label.startswith("1M")
+
+
+def test_default_sort_marked_and_applied(monkeypatch):
+    at = _run(monkeypatch)
+    assert at.button(key="sort_pth_FromHigh52").label.endswith("▼")
+    a, b = _order(at, "P0", "P47")
+    assert a < b  # closest to the high first
+
+
+def test_click_header_sorts_then_flips(monkeypatch):
+    at = _run(monkeypatch)
+    at.button(key="sort_pth_R1W").click().run()
+    assert at.button(key="sort_pth_R1W").label.endswith("▼")
+    assert not at.button(key="sort_pth_FromHigh52").label.endswith(("▼", "▲"))
+    a, b = _order(at, "P47", "P0")
+    assert a < b  # biggest 1W first
+    at.button(key="sort_pth_R1W").click().run()
+    assert at.button(key="sort_pth_R1W").label.endswith("▲")
+    a, b = _order(at, "P0", "P47")
+    assert a < b
+
+
+def test_stock_header_sorts_a_to_z_first(monkeypatch):
+    at = _run(monkeypatch)
+    at.button(key="sort_pth_Ticker").click().run()
+    assert at.button(key="sort_pth_Ticker").label.endswith("▲")
+    a, b = _order(at, "P0", "X0")
+    assert a < b
+
+
+def test_sort_is_kept_per_tab(monkeypatch):
+    at = _run(monkeypatch)
+    at.button(key="sort_pth_R1W").click().run()
+    _tile(at, "fallen").click().run()
+    assert at.button(key="sort_fallen_FromHigh52").label.endswith("▼")
+    _tile(at, "pth").click().run()
+    assert at.button(key="sort_pth_R1W").label.endswith("▼")

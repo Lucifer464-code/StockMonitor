@@ -25,14 +25,11 @@ STYLES = """<style>
 .sm-id{flex:1;min-width:0}
 .sm-id b{font-weight:700}
 .sm-when{font-size:11px;color:#8994a7;white-space:nowrap}
-.sm-head-row{display:flex;align-items:center;font-size:11px;color:#8994a7;padding:8px 0 6px;border-bottom:1px solid #f1f3f6}
-.sm-head-row .sm-h-id{flex:1;min-width:0;padding-left:16px}
-.sm-head-row .sm-h-spark{width:64px;flex:none;margin:0 6px;text-align:center}
-.sm-head-row .sm-key,.sm-head-row .sm-right{line-height:1.25}
 .sm-sub{font-size:11px;color:#8994a7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sm-spark{flex:none;margin:0 6px}
 .sm-key{width:62px;flex:none;text-align:right}
 .sm-right{width:78px;flex:none;text-align:right}
+.sm-num{width:56px;flex:none;text-align:right}
 .sm-up{color:#00a86b}
 .sm-dn{color:#e5484d}
 .sm-panel{padding:4px 0 14px 16px}
@@ -53,6 +50,7 @@ STYLES = """<style>
 .sm-panel{padding-left:8px}
 .sm-key{width:54px}
 .sm-right{width:70px}
+.sm-num{width:48px}
 }
 </style>"""
 
@@ -156,13 +154,10 @@ def _row(r, view: str, market: str, session) -> str:
     when = ""
     spark_pts = list(r["Spark"]) if isinstance(r["Spark"], (list, tuple)) else []
     if view == "fallen":
-        if session is not None and not _nan(r["Low52Date"]):
-            days = (pd.Timestamp(session).normalize() - pd.Timestamp(r["Low52Date"]).normalize()).days
-            sub = name
-            when = f'<div class="sm-when">low {days} days ago</div>'
         spark = _spark_img(sparkline_svg(spark_pts, color=MUTED))
         key = f'<span class="sm-key sm-dn">{fmt_pct(r["FromHigh52"], signed=False)}</span>'
-        right = f'<div class="sm-right sm-up">{fmt_pct(r["OffLow52"])}</div>'
+        right = "".join(f'<span class="sm-num {_tone(r[c])}">{fmt_pct(r[c])}</span>'
+                        for c in ("R1W", "R1M"))
     else:
         spark = _spark_img(sparkline_svg(spark_pts[-config.SPARK_SHORT:]))
         col = "FromATH" if view == "ath" else "FromHigh52"
@@ -199,22 +194,26 @@ def _row(r, view: str, market: str, session) -> str:
         f'{listed}<div class="sm-facts">{"".join(facts)}</div></div></details>')
 
 
+# The list's columns per view: (label, sort column or None, width class).
+# app.py draws these as the sortable header; the widths match the row cells.
 HEADERS = {
-    "pth": ("1M trend", "From 52w high", "Price · 1W"),
-    "ath": ("1M trend", "From ATH", "Price · 1W"),
-    "fallen": ("3M trend", "From 52w high", "Off low"),
+    "pth": [("Stock", "Ticker", "sm-h-id"), ("1M trend", None, "sm-h-spark"),
+            ("From 52w high", "FromHigh52", "sm-key"), ("Price · 1W", "R1W", "sm-right")],
+    "fallen": [("Stock", "Ticker", "sm-h-id"), ("3M trend", None, "sm-h-spark"),
+               ("From 52w high", "FromHigh52", "sm-key"), ("5D", "R1W", "sm-num"),
+               ("1M", "R1M", "sm-num")],
+    "ath": [("Stock", "Ticker", "sm-h-id"), ("1M trend", None, "sm-h-spark"),
+            ("From ATH", "FromATH", "sm-key"), ("Price · 1W", "R1W", "sm-right")],
 }
 
-
-def _head(view: str) -> str:
-    trend, key, right = HEADERS[view]
-    return (f'<div class="sm-head-row"><span class="sm-h-id">Stock</span>'
-            f'<span class="sm-h-spark">{trend}</span><span class="sm-key">{key}</span>'
-            f'<span class="sm-right">{right}</span></div>')
+# Width of each header cell, desktop and phone, matching the row CSS above
+# (the trend cell is the 64px image plus 6px margins either side).
+HEADER_WIDTHS = {"sm-h-spark": (76, 76), "sm-key": (62, 54), "sm-right": (78, 70),
+                 "sm-num": (56, 48)}
 
 
 def rows_html(df: pd.DataFrame, view: str, market: str, session: pd.Timestamp | None) -> str:
     if df.empty:
         return '<div class="sm-empty">No stocks match right now.</div>'
     rows = "".join(_row(r, view, market, session) for _, r in df.iterrows())
-    return f'<div class="sm-card">{_head(view)}{rows}</div>'
+    return f'<div class="sm-card">{rows}</div>'

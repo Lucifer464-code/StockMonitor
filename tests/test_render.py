@@ -1,7 +1,7 @@
 import pandas as pd
 
 from stockmonitor import config
-from ui.render import STYLES, fmt_mcap, fmt_pct, rows_html, sparkline_svg
+from ui.render import HEADERS, STYLES, fmt_mcap, fmt_pct, rows_html, sparkline_svg
 
 SESSION = pd.Timestamp("2026-10-16")
 
@@ -45,11 +45,13 @@ def test_returns_strip_has_seven():
     assert rows_html(_df(), "pth", "US", SESSION).count('class="sm-ret"') == 7
 
 
-def test_fallen_key_columns():
-    out = rows_html(_df(), "fallen", "US", SESSION)
-    assert "−85.0%" in out and "+25.0%" in out
-    assert "low 18 days ago" in out
-    assert "low 18 days ago" not in rows_html(_df(), "fallen", "US", None)
+def test_fallen_row_shows_5d_and_1m_not_off_low():
+    s = _summary(rows_html(_df(), "fallen", "US", SESSION))
+    assert '<span class="sm-key sm-dn">−85.0%</span>' in s
+    assert '<span class="sm-num sm-up">+1.1%</span>' in s      # 5D (R1W)
+    assert '<span class="sm-num sm-dn">−7.9%</span>' in s      # 1M (R1M)
+    assert "+25.0%" not in s and "days ago" not in s
+    assert '<div class="sm-sub">Alpha Corp · $130B</div>' in s
 
 
 def test_fmt_mcap():
@@ -92,27 +94,21 @@ def test_rows_embed_sparkline_as_image():
     assert '<img class="sm-spark" src="data:image/svg+xml;base64,' in out
 
 
-def test_column_headers_per_view():
-    expected = {
-        "pth": ["Stock", "1M trend", "From 52w high", "Price · 1W"],
-        "ath": ["Stock", "1M trend", "From ATH", "Price · 1W"],
-        "fallen": ["Stock", "3M trend", "From 52w high", "Off low"],
+def test_header_spec_per_view():
+    labels = {v: [(lab, col) for lab, col, _ in HEADERS[v]] for v in HEADERS}
+    assert labels == {
+        "pth": [("Stock", "Ticker"), ("1M trend", None), ("From 52w high", "FromHigh52"),
+                ("Price · 1W", "R1W")],
+        "fallen": [("Stock", "Ticker"), ("3M trend", None), ("From 52w high", "FromHigh52"),
+                   ("5D", "R1W"), ("1M", "R1M")],
+        "ath": [("Stock", "Ticker"), ("1M trend", None), ("From ATH", "FromATH"),
+                ("Price · 1W", "R1W")],
     }
-    for view, labels in expected.items():
-        out = rows_html(_df(), view, "US", SESSION)
-        head = out[out.index('<div class="sm-head-row">'):out.index('<details')]
-        for label in labels:
-            assert f">{label}<" in head, (view, label)
-    assert "sm-head-row" not in rows_html(_df().iloc[0:0], "pth", "US", SESSION)
 
 
-def test_fallen_low_days_not_truncated():
-    out = rows_html(_df(Name="A Very Long Company Name Holdings Incorporated"), "fallen", "US", SESSION)
-    assert '<div class="sm-when">low 18 days ago</div>' in out
-    # the truncating subtitle must not contain the days
-    import re
-    for sub in re.findall(r'<div class="sm-sub[^"]*">(.*?)</div>', out):
-        assert "days ago" not in sub
+def test_rows_html_leaves_the_header_to_the_app():
+    # The sortable header is drawn by app.py as buttons, not in this HTML.
+    assert "sm-head-row" not in rows_html(_df(), "pth", "US", SESSION)
 
 
 def _summary(out):

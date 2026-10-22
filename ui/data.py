@@ -16,11 +16,11 @@ TEXT_COLUMNS = ["Ticker", "Name"]
 NUMBER_COLUMNS = [c for c in config.COLUMNS
                   if c not in DATE_COLUMNS + BOOL_COLUMNS + TEXT_COLUMNS + ["InIndex", "Spark"]]
 
-# view -> (flag column, sort column); every view sorts descending.
+# view -> (flag column, default sort column); defaults sort descending.
 VIEWS = {
     "pth": ("IsPTH", "FromHigh52"),
     "ath": ("IsATH", "R1W"),
-    "fallen": ("IsFallen", "OffLow52"),
+    "fallen": ("IsFallen", "FromHigh52"),
 }
 
 _LABEL_DATE = re.compile(r"Price as on (\w{3}) (\d{1,2}), (\d{4})")
@@ -124,14 +124,25 @@ def load_market(market: str) -> MarketData:
     return parse_tab(ws.get_all_values())
 
 
-def view_rows(md: MarketData, view: str, index_only: bool) -> pd.DataFrame:
-    flag, sort_col = VIEWS[view]
+def view_rows(md: MarketData, view: str, index_only: bool,
+              sort: str | None = None, ascending: bool = False) -> pd.DataFrame:
+    """The view's stocks, sorted by `sort` (the view's default column if None).
+
+    Blank values sort last in either direction; ties go to the larger company.
+    """
+    flag, default_col = VIEWS[view]
+    sort_col = sort or default_col
     df = md.df
     mask = df[flag].astype(bool)
     if index_only:
         mask &= df["InIndex"].eq(True)
-    # Ties go to the larger company; multi-key sorts are stable.
-    return df[mask].sort_values([sort_col, "MarketCap"], ascending=False, na_position="last")
+    rows = df[mask]
+    if sort_col == "Ticker":
+        rows = rows.assign(_key=rows["Ticker"].str.upper())
+        return rows.sort_values(["_key", "MarketCap"], ascending=[ascending, False],
+                                na_position="last").drop(columns="_key")
+    return rows.sort_values([sort_col, "MarketCap"], ascending=[ascending, False],
+                            na_position="last")
 
 
 def view_counts(md: MarketData, index_only: bool) -> dict[str, int]:

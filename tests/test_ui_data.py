@@ -27,8 +27,8 @@ def _md():
         _row(Ticker="A", IsPTH="TRUE", FromHigh52="-1.2", R1W="3", InIndex="TRUE"),
         _row(Ticker="B", IsPTH="TRUE", FromHigh52="-0.4", R1W="9"),
         _row(Ticker="C", IsPTH="TRUE", IsATH="TRUE", FromHigh52="-4.1", R1W="5"),
-        _row(Ticker="D", IsFallen="TRUE", OffLow52="12", InIndex="TRUE"),
-        _row(Ticker="E", IsFallen="TRUE", OffLow52="30"),
+        _row(Ticker="D", IsFallen="TRUE", FromHigh52="-15", R1W="-2", R1M="4", InIndex="TRUE"),
+        _row(Ticker="E", IsFallen="TRUE", FromHigh52="-12", R1W="", R1M="-1"),
     ]))
 
 
@@ -73,6 +73,20 @@ def test_view_rows_sort_and_filter():
     assert list(view_rows(md, "pth", False)["Ticker"]) == ["B", "A", "C"]
     assert list(view_rows(md, "ath", False)["Ticker"]) == ["C"]
     assert list(view_rows(md, "fallen", False)["Ticker"]) == ["E", "D"]
+
+
+def test_view_rows_custom_sort():
+    md = _md()
+    assert list(view_rows(md, "pth", False, sort="R1W")["Ticker"]) == ["B", "C", "A"]
+    assert list(view_rows(md, "pth", False, sort="R1W", ascending=True)["Ticker"]) == ["A", "C", "B"]
+    assert list(view_rows(md, "pth", False, sort="Ticker", ascending=True)["Ticker"]) == ["A", "B", "C"]
+    assert list(view_rows(md, "fallen", False, sort="R1M")["Ticker"]) == ["D", "E"]
+
+
+def test_view_rows_blank_values_sort_last_both_ways():
+    md = _md()
+    assert list(view_rows(md, "fallen", False, sort="R1W")["Ticker"]) == ["D", "E"]
+    assert list(view_rows(md, "fallen", False, sort="R1W", ascending=True)["Ticker"]) == ["D", "E"]
 
 
 def test_view_rows_index_only():
