@@ -34,17 +34,19 @@ class MarketData:
     universe: int
     priced: int
     index_ok: bool
+    expected: int = 0      # coverage denominator (F2); the universe on older tabs
+    counts_ok: bool = True  # False if D1 or D2 was blank or garbled
 
 
 def _cell(row: list[str], i: int) -> str:
     return row[i].strip() if i < len(row) else ""
 
 
-def _int(text: str) -> int:
+def _int_or_none(text: str) -> int | None:
     try:
         return int(float(text))
-    except ValueError:
-        return 0
+    except (ValueError, OverflowError):
+        return None
 
 
 def _session(label: str) -> pd.Timestamp | None:
@@ -94,13 +96,17 @@ def parse_tab(values: list[list[str]]) -> MarketData:
     df["InIndex"] = pd.Series([_in_index(str(v).strip()) for v in df["InIndex"]],
                               index=df.index, dtype=object)
     df["Spark"] = pd.Series([_spark(str(v)) for v in df["Spark"]], index=df.index, dtype=object)
+    universe, priced = _int_or_none(_cell(r1, 3)), _int_or_none(_cell(r2, 3))
+    expected = _int_or_none(_cell(r2, 5))
     return MarketData(
         df=df,
         price_label=label,
         session=_session(label),
-        universe=_int(_cell(r1, 3)),
-        priced=_int(_cell(r2, 3)),
+        universe=universe or 0,
+        priced=priced or 0,
         index_ok=_cell(r1, 5).upper() == "OK",
+        expected=expected if expected is not None else (universe or 0),
+        counts_ok=universe is not None and priced is not None,
     )
 
 
@@ -124,7 +130,8 @@ def view_rows(md: MarketData, view: str, index_only: bool) -> pd.DataFrame:
     mask = df[flag].astype(bool)
     if index_only:
         mask &= df["InIndex"].eq(True)
-    return df[mask].sort_values(sort_col, ascending=False, na_position="last")
+    # Ties go to the larger company; multi-key sorts are stable.
+    return df[mask].sort_values([sort_col, "MarketCap"], ascending=False, na_position="last")
 
 
 def view_counts(md: MarketData, index_only: bool) -> dict[str, int]:

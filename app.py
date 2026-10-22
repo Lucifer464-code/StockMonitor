@@ -1,5 +1,6 @@
 """Stock Monitor: stocks near their highs, and fallen stocks that have stopped falling."""
 import html
+import traceback
 
 import streamlit as st
 
@@ -106,7 +107,10 @@ market = MARKETS[choice or st.session_state["_market_last"]]
 try:
     md = data.load_market(market)
 except Exception:
+    traceback.print_exc()
     md = None
+# A tab whose label or counts can't be read is unavailable, not a quiet market.
+usable = (md is not None and md.session is not None and md.universe > 0 and md.counts_ok)
 
 with right:
     index_name = render.INDEX_LABEL[market]
@@ -122,7 +126,7 @@ header.html(f'<div class="sm-head"><div class="sm-title">Highs &amp; Lows</div>{
 if md is not None and not md.index_ok:
     st.caption(f"The {index_name} list is unavailable right now, so all stocks are shown.")
 
-counts = data.view_counts(md, index_only) if md is not None else {v: 0 for v, _, _ in TILES}
+counts = data.view_counts(md, index_only) if usable else {v: 0 for v, _, _ in TILES}
 
 with st.container(key="tiles"):
     for col, (key, title, caption) in zip(st.columns(3), TILES):
@@ -132,9 +136,12 @@ with st.container(key="tiles"):
 
 if md is None:
     st.info(f"Data for {MARKET_NAME[market]} isn't available yet.")
+elif not usable:
+    st.warning(f"Data for {MARKET_NAME[market]} isn't available yet.")
 else:
-    if md.universe > 0 and md.priced / md.universe < config.COVERAGE_WARN:
-        pct = round(100 * md.priced / md.universe)
+    expected = max(md.expected, md.universe)
+    if md.priced / expected < config.COVERAGE_WARN:
+        pct = round(100 * md.priced / expected)
         st.warning(f"Only {pct}% of {MARKET_NAME[market]} stocks could be priced in the last "
                    "update — lists may be incomplete.")
     st.html(render.rows_html(data.view_rows(md, view, index_only), view, market, md.session))

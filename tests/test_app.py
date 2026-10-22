@@ -17,7 +17,8 @@ def _row(**kw):
     return [base[c] for c in config.COLUMNS]
 
 
-def _md(universe=100, priced=100, index="OK", label="Price as on Oct 16, 2026  (Close)"):
+def _md(universe=100, priced=100, index="OK", label="Price as on Oct 16, 2026  (Close)",
+        expected=None):
     """In the index: 48 PTH (31 of them also ATH) and 3 Fallen. Plus 5 PTH outside it."""
     rows = [_row(Ticker=f"P{i}", IsPTH="TRUE", IsATH="TRUE" if i < 31 else "FALSE")
             for i in range(48)]
@@ -25,7 +26,8 @@ def _md(universe=100, priced=100, index="OK", label="Price as on Oct 16, 2026  (
     rows += [_row(Ticker=f"X{i}", IsPTH="TRUE", InIndex="FALSE") for i in range(5)]
     values = [
         [label, "", "Universe", str(universe), "IndexList", index],
-        ["Updated Oct 22, 2026", "", "Priced", str(priced)],
+        ["Updated Oct 22, 2026", "", "Priced", str(priced), "Expected",
+         "" if expected is None else str(expected)],
         list(config.COLUMNS),
         *rows,
     ]
@@ -123,3 +125,36 @@ def test_load_failure_shows_message(monkeypatch):
     at.segmented_control(key="market").set_value("India").run()
     assert not at.exception
     assert any("Data for India isn't available yet." in i.value for i in at.info)
+
+
+def test_low_coverage_measured_against_expected(monkeypatch):
+    # The run's own universe shrank to 100, but the previous run had 200.
+    at = _run(monkeypatch, md=_md(universe=100, priced=100, expected=200))
+    assert any("50%" in w.value for w in at.warning)
+
+
+def _unavailable(at, name="US"):
+    return any(f"Data for {name} isn't available yet." in w.value for w in at.warning)
+
+
+def test_unparseable_label_is_unavailable_not_empty(monkeypatch):
+    at = _run(monkeypatch, md=_md(label="weird label"))
+    assert _unavailable(at)
+    assert "P0" not in _page_html(at) and "No stocks match" not in _page_html(at)
+
+
+def test_blank_universe_is_unavailable_not_empty(monkeypatch):
+    at = _run(monkeypatch, md=_md(universe=""))
+    assert _unavailable(at)
+    assert "P0" not in _page_html(at) and "No stocks match" not in _page_html(at)
+
+
+def test_garbled_priced_is_unavailable(monkeypatch):
+    at = _run(monkeypatch, md=_md(priced="#REF!"))
+    assert _unavailable(at)
+
+
+def test_load_failure_logged_with_traceback(monkeypatch, capsys):
+    _run(monkeypatch, fail=True)
+    err = capsys.readouterr().err
+    assert "Traceback" in err and "RuntimeError: tab missing" in err

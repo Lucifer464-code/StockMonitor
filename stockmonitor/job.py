@@ -3,6 +3,7 @@ import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import gspread
 import pandas as pd
 
 from stockmonitor import config, history, metrics, sheets, universe
@@ -91,9 +92,14 @@ def _cell(v):
 
 def write_tab(ws, rows: list[dict], price_label: str, updated_label: str,
               stats: dict, index_ok: bool) -> None:
+    """Write the new block from A1, then clear only what lies below it.
+
+    The sheet is never cleared first: if the write fails, yesterday's data
+    stays whole instead of the tab reading as a market with nothing in it.
+    """
     values = [
         [price_label, "", "Universe", stats["universe"], "IndexList", "OK" if index_ok else "MISSING"],
-        [updated_label, "", "Priced", stats["priced"]],
+        [updated_label, "", "Priced", stats["priced"], "Expected", stats["expected"]],
         list(config.COLUMNS),
     ]
     for r in rows:
@@ -101,8 +107,19 @@ def write_tab(ws, rows: list[dict], price_label: str, updated_label: str,
                        for c in config.COLUMNS])
     if ws.row_count < len(values):
         ws.resize(rows=len(values))
-    ws.clear()
     ws.update(values=values, range_name="A1", value_input_option="RAW")
+    last = len(values)
+    if ws.row_count > last:
+        corner = gspread.utils.rowcol_to_a1(ws.row_count, max(ws.col_count, len(config.COLUMNS)))
+        ws.batch_clear([f"A{last + 1}:{corner}"])
+
+
+def _previous_universe(ws) -> int:
+    """The universe size the tab's last run recorded in D1; 0 if absent or unparseable."""
+    try:
+        return int(float(ws.acell("D1").value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _labels(session: pd.Timestamp) -> tuple[str, str]:
@@ -118,33 +135,44 @@ def run(markets: list[str]) -> int:
     code = 0
     for market in markets:
         print(f"\n=== {market} ===")
-        reference = history.latest_settled_session(market)
-        if reference is None:
-            print(f"  [ERROR] no settled session for {market}; skipping, nothing written")
+        try:
+            code = max(code, _run_market(sh, market))
+        except Exception as e:
+            print(f"  [ERROR] {market} failed: {type(e).__name__}: {e}; skipping, nothing written")
             code = 1
-            continue
-        stocks = universe.us_universe() if market == "US" else universe.india_universe()
-        print(f"  Universe: {len(stocks)}")
-        if not stocks:
-            print(f"  [ERROR] empty universe for {market}; nothing written")
-            code = 1
-            continue
-        members = universe.index_members(market)
-        rows, stats = build_rows(stocks, members, reference)
-        session = stats["session"]
-        if session is None:
-            print(f"  [ERROR] no consensus session for {market}; nothing written")
-            code = 1
-            continue
-        print(f"  Reference session: {reference.date()}  Consensus session: {session.date()}")
-        print(f"  Stale: {stats['stale']}")
-        print(f"  Screened out of Fallen ({len(stats['screened'])}): "
-              f"{', '.join(stats['screened']) or '-'}")
-        if stats["priced"] / len(stocks) < config.COVERAGE_WARN:
-            print(f"  [LOW COVERAGE] {stats['priced']}/{len(stocks)} = "
-                  f"{stats['priced'] / len(stocks):.0%}")
-        price_label, updated_label = _labels(session)
-        ws = sheets.get_or_create_ws(sh, config.TABS[market])
-        write_tab(ws, rows, price_label, updated_label, stats, members is not None)
-        print(f"  Wrote {len(rows)} rows to '{config.TABS[market]}' ({price_label})")
     return code
+
+
+def _run_market(sh, market: str) -> int:
+    """Price one market and write its tab. Returns 0, or 1 if nothing was written."""
+    reference = history.latest_settled_session(market)
+    if reference is None:
+        print(f"  [ERROR] no settled session for {market}; skipping, nothing written")
+        return 1
+    stocks = universe.us_universe() if market == "US" else universe.india_universe()
+    print(f"  Universe: {len(stocks)}")
+    if not stocks:
+        print(f"  [ERROR] empty universe for {market}; nothing written")
+        return 1
+    members = universe.index_members(market)
+    rows, stats = build_rows(stocks, members, reference)
+    session = stats["session"]
+    if session is None:
+        print(f"  [ERROR] no consensus session for {market}; nothing written")
+        return 1
+    ws = sheets.get_or_create_ws(sh, config.TABS[market])
+    # Measure coverage against something a bad run cannot shrink.
+    previous = _previous_universe(ws)
+    stats["expected"] = expected = max(stats["universe"], previous)
+    print(f"  Reference session: {reference.date()}  Consensus session: {session.date()}")
+    print(f"  Expected: {expected} (previous universe {previous})")
+    print(f"  Stale: {stats['stale']}")
+    print(f"  Screened out of Fallen ({len(stats['screened'])}): "
+          f"{', '.join(stats['screened']) or '-'}")
+    if stats["priced"] / expected < config.COVERAGE_WARN:
+        print(f"  [LOW COVERAGE] {stats['priced']}/{expected} = "
+              f"{stats['priced'] / expected:.0%}")
+    price_label, updated_label = _labels(session)
+    write_tab(ws, rows, price_label, updated_label, stats, members is not None)
+    print(f"  Wrote {len(rows)} rows to '{config.TABS[market]}' ({price_label})")
+    return 0

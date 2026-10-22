@@ -84,3 +84,37 @@ def test_view_rows_index_only():
 def test_view_counts():
     assert view_counts(_md(), False) == {"pth": 3, "ath": 1, "fallen": 2}
     assert view_counts(_md(), True) == {"pth": 1, "ath": 0, "fallen": 1}
+
+
+def test_parse_tab_expected_from_f2():
+    v = _values([])
+    v[1] += ["Expected", "12"]
+    md = parse_tab(v)
+    assert md.expected == 12 and md.counts_ok
+
+
+def test_parse_tab_expected_falls_back_to_universe():
+    md = parse_tab(_values([]))  # an older tab with no E2/F2
+    assert md.expected == 10 and md.counts_ok
+
+
+def test_parse_tab_blank_or_garbled_counts_flagged():
+    for d1, d2 in [("", "9"), ("10", "n/a")]:
+        v = _values([])
+        v[0][3], v[1][3] = d1, d2
+        md = parse_tab(v)
+        assert md.counts_ok is False
+        assert (md.universe, md.priced) == ((0, 9) if d1 == "" else (10, 0))
+
+
+def test_view_rows_ties_break_by_market_cap():
+    md = parse_tab(_values([
+        _row(Ticker="S", IsPTH="TRUE", IsATH="TRUE", IsFallen="TRUE", FromHigh52="-1", R1W="2",
+             OffLow52="5", MarketCap="1e9"),
+        _row(Ticker="L", IsPTH="TRUE", IsATH="TRUE", IsFallen="TRUE", FromHigh52="-1", R1W="2",
+             OffLow52="5", MarketCap="9e9"),
+        _row(Ticker="M", IsPTH="TRUE", IsATH="TRUE", IsFallen="TRUE", FromHigh52="-1", R1W="2",
+             OffLow52="5", MarketCap="5e9"),
+    ]))
+    for view in ("pth", "ath", "fallen"):
+        assert list(view_rows(md, view, False)["Ticker"]) == ["L", "M", "S"], view

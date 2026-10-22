@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from conftest import make_series
 from stockmonitor import job
@@ -12,20 +13,34 @@ SESSION = pd.Timestamp("2026-10-16")
 
 class FakeWS:
     row_count = 1000
+    col_count = 26
 
-    def __init__(self):
-        self.cleared = False
+    def __init__(self, d1=None, fail_update=False):
+        self.calls = []
         self.updates = []
+        self.d1 = d1
+        self.fail_update = fail_update
 
     def clear(self):
-        self.cleared = True
+        self.calls.append("clear")
 
     def update(self, values, range_name, value_input_option):
+        if self.fail_update:
+            raise RuntimeError("quota exceeded")
+        self.calls.append("update")
         self.updates.append(type("U", (), {"range": range_name, "values": values,
                                            "opt": value_input_option})())
 
+    def batch_clear(self, ranges):
+        self.calls.append(("batch_clear", ranges))
+
     def resize(self, rows):
+        self.calls.append(("resize", rows))
         self.row_count = rows
+
+    def acell(self, label):
+        assert label == "D1"
+        return type("C", (), {"value": self.d1})()
 
 
 def make_row(**kw):
@@ -35,16 +50,15 @@ def make_row(**kw):
     return row
 
 
-STATS = {"universe": 10, "priced": 9, "stale": 1, "screened": []}
+STATS = {"universe": 10, "priced": 9, "stale": 1, "screened": [], "expected": 12}
 
 
 def test_write_tab_layout():
     ws = FakeWS()
     write_tab(ws, [make_row()], "Price as on Oct 16, 2026  (Close)", "Updated ...", STATS, True)
-    assert ws.cleared
     v = ws.updates[0].values
     assert v[0][0].startswith("Price as on") and v[0][2:6] == ["Universe", 10, "IndexList", "OK"]
-    assert v[1][2:4] == ["Priced", 9]
+    assert v[1][2:6] == ["Priced", 9, "Expected", 12]
     assert v[2] == COLUMNS
     assert ws.updates[0].opt == "RAW"
     assert len(v) == 4
@@ -105,10 +119,12 @@ def test_build_rows_keeps_flagged_only(monkeypatch):
 
 
 def test_build_rows_counts_stale(monkeypatch):
+    # 19 of 20 (95%) have the session's bar, so it stands and BBB is stale.
     short = make_series([10.0] * 50, end="2026-10-14")
-    patch(monkeypatch, {"AAA": PTH, "BBB": short, "CCC": PTH, "DDD": PTH, "EEE": PTH})
-    rows, stats = build_rows(stocks("AAA", "BBB", "CCC", "DDD", "EEE"), None, SESSION)
-    assert stats["stale"] == 1 and stats["priced"] == 4
+    syms = ["BBB"] + [f"S{i}" for i in range(19)]
+    patch(monkeypatch, {s: (short if s == "BBB" else PTH) for s in syms})
+    rows, stats = build_rows(stocks(*syms), None, SESSION)
+    assert stats["stale"] == 1 and stats["priced"] == 19
     assert stats["session"] == SESSION
 
 
@@ -145,3 +161,71 @@ def test_build_rows_in_index(monkeypatch):
     assert {r["Ticker"]: r["InIndex"] for r in rows} == {"AAA": True, "BBB": False}
     rows, _ = build_rows(sts, None, SESSION)
     assert all(r["InIndex"] == "" for r in rows)
+
+
+def test_write_tab_writes_before_clearing_below():
+    ws = FakeWS()
+    write_tab(ws, [make_row(), make_row()], "p", "u", STATS, True)
+    assert "clear" not in ws.calls
+    assert ws.calls == ["update", ("batch_clear", ["A6:Z1000"])]
+
+
+def test_write_tab_grows_sheet_first():
+    ws = FakeWS()
+    ws.row_count = 3
+    write_tab(ws, [make_row(), make_row()], "p", "u", STATS, True)
+    assert ws.calls == [("resize", 5), "update"]
+
+
+def test_write_tab_failed_update_keeps_old_data():
+    ws = FakeWS(fail_update=True)
+    with pytest.raises(RuntimeError):
+        write_tab(ws, [make_row()], "p", "u", STATS, True)
+    assert ws.calls == []  # nothing was cleared
+
+
+# ── run(): expected count and per-market isolation ───────────
+
+def patch_run(monkeypatch, tabs, priced=None, boom=()):
+    """Fake everything run() touches. tabs: {tab title: FakeWS}."""
+    monkeypatch.setattr(job.sheets, "open_sheet", lambda: object())
+    monkeypatch.setattr(job.sheets, "get_or_create_ws", lambda sh, title: tabs[title])
+    monkeypatch.setattr(job.history, "latest_settled_session", lambda m: SESSION)
+    monkeypatch.setattr(job.universe, "us_universe", lambda: stocks(*[f"U{i}" for i in range(10)]))
+    monkeypatch.setattr(job.universe, "india_universe", lambda: stocks(*[f"I{i}.NS" for i in range(10)]))
+    monkeypatch.setattr(job.universe, "index_members", lambda m: set())
+
+    def fake_build(sts, members, ref):
+        if sts[0].symbol.startswith(boom):
+            raise MemoryError("consensus blew up")
+        n = len(sts) if priced is None else priced
+        return [], {"universe": len(sts), "priced": n, "stale": len(sts) - n,
+                    "screened": [], "session": SESSION}
+
+    monkeypatch.setattr(job, "build_rows", fake_build)
+
+
+def test_run_expected_is_max_of_universe_and_previous(monkeypatch, capsys):
+    us, india = FakeWS(d1="20"), FakeWS(d1="")
+    patch_run(monkeypatch, {"H&L US": us, "H&L India": india}, priced=10)
+    assert job.run(["US", "IN"]) == 0
+    assert us.updates[0].values[1][4:6] == ["Expected", 20]
+    assert us.updates[0].values[0][3] == 10
+    assert india.updates[0].values[1][4:6] == ["Expected", 10]
+    out = capsys.readouterr().out
+    assert "[LOW COVERAGE] 10/20 = 50%" in out
+
+
+def test_run_unparseable_previous_counts_as_zero(monkeypatch):
+    us = FakeWS(d1="Universe?")
+    patch_run(monkeypatch, {"H&L US": us})
+    job.run(["US"])
+    assert us.updates[0].values[1][5] == 10
+
+
+def test_run_market_failure_does_not_stop_the_other(monkeypatch, capsys):
+    us, india = FakeWS(), FakeWS()
+    patch_run(monkeypatch, {"H&L US": us, "H&L India": india}, boom="U")
+    assert job.run(["US", "IN"]) == 1
+    assert us.updates == [] and len(india.updates) == 1
+    assert "[ERROR] US failed: MemoryError: consensus blew up" in capsys.readouterr().out
