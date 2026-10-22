@@ -59,8 +59,15 @@ def _page_html(at):
     return " ".join(h.value for h in at.html)
 
 
+def test_index_defaults_to_all(monkeypatch):
+    at = _run(monkeypatch)
+    assert at.selectbox(key="index_US").value == "All"
+    assert "53" in _tile(at, "pth").label
+
+
 def test_tiles_show_counts(monkeypatch):
     at = _run(monkeypatch)
+    at.selectbox(key="index_US").select("S&P 500").run()
     assert "48" in _tile(at, "pth").label
     assert "31" in _tile(at, "ath").label
     assert "3" in _tile(at, "fallen").label
@@ -75,6 +82,8 @@ def test_tile_click_switches_view(monkeypatch):
 
 def test_index_filter_changes_counts(monkeypatch):
     at = _run(monkeypatch)
+    at.selectbox(key="index_US").select("S&P 500").run()
+    assert "48" in _tile(at, "pth").label
     at.selectbox(key="index_US").select("All").run()
     assert "53" in _tile(at, "pth").label
 
@@ -83,7 +92,8 @@ def test_market_switch_changes_index_options(monkeypatch):
     at = _run(monkeypatch)
     assert at.segmented_control(key="market").options == ["US", "India"]
     at.segmented_control(key="market").set_value("India").run()
-    assert at.selectbox(key="index_IN").options == ["NIFTY 500", "All"]
+    assert at.selectbox(key="index_IN").options == ["All", "NIFTY 500"]
+    assert at.selectbox(key="index_IN").value == "All"
     assert at.calls[-1] == "IN"
 
 
