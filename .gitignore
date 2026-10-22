@@ -1,0 +1,22 @@
+# Secrets
+service_account.json
+.streamlit/secrets.toml
+
+# Caches / generated data
+*.pkl
+__pycache__/
+*.pyc
+
+# Environments
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dev tools
+.claude/
+.superpowers/
