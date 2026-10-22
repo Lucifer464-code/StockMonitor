@@ -24,6 +24,11 @@ STYLES = """<style>
 .sm-row[open] .sm-chev{transform:rotate(90deg);color:#00a86b}
 .sm-id{flex:1;min-width:0}
 .sm-id b{font-weight:700}
+.sm-when{font-size:11px;color:#8994a7;white-space:nowrap}
+.sm-head-row{display:flex;align-items:center;font-size:11px;color:#8994a7;padding:8px 0 6px;border-bottom:1px solid #f1f3f6}
+.sm-head-row .sm-h-id{flex:1;min-width:0;padding-left:16px}
+.sm-head-row .sm-h-spark{width:64px;flex:none;margin:0 6px;text-align:center}
+.sm-head-row .sm-key,.sm-head-row .sm-right{line-height:1.25}
 .sm-sub{font-size:11px;color:#8994a7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sm-spark{flex:none;margin:0 6px}
 .sm-key{width:62px;flex:none;text-align:right}
@@ -148,11 +153,13 @@ def _row(r, view: str, market: str, session) -> str:
     mc = fmt_mcap(r["MarketCap"], market)
     name = e(str(r["Name"]))
     sub = f"{name} · {e(mc)}"
+    when = ""
     spark_pts = list(r["Spark"]) if isinstance(r["Spark"], (list, tuple)) else []
     if view == "fallen":
         if session is not None and not _nan(r["Low52Date"]):
             days = (pd.Timestamp(session).normalize() - pd.Timestamp(r["Low52Date"]).normalize()).days
-            sub = f"{name} · low {days} days ago"
+            sub = name
+            when = f'<div class="sm-when">low {days} days ago</div>'
         spark = _spark_img(sparkline_svg(spark_pts, color=MUTED))
         key = f'<span class="sm-key sm-dn">{fmt_pct(r["FromHigh52"], signed=False)}</span>'
         right = f'<div class="sm-right sm-up">{fmt_pct(r["OffLow52"])}</div>'
@@ -179,7 +186,7 @@ def _row(r, view: str, market: str, session) -> str:
 
     return (
         '<details class="sm-row"><summary><span class="sm-chev">▶</span>'
-        f'<div class="sm-id"><b>{e(str(r["Ticker"]))}</b><div class="sm-sub">{sub}</div></div>'
+        f'<div class="sm-id"><b>{e(str(r["Ticker"]))}</b><div class="sm-sub">{sub}</div>{when}</div>'
         f"{spark}{key}{right}</summary>"
         f'<div class="sm-panel"><div class="sm-rets">{tiles}</div>'
         f'<div class="sm-range"><div class="sm-bar"><div class="sm-dot" style="left:{pos:.1f}%"></div></div>'
@@ -188,8 +195,22 @@ def _row(r, view: str, market: str, session) -> str:
         f'{listed}<div class="sm-facts">{"".join(facts)}</div></div></details>')
 
 
+HEADERS = {
+    "pth": ("1M trend", "From 52w high", "Price · 1W"),
+    "ath": ("1M trend", "From ATH", "Price · 1W"),
+    "fallen": ("3M trend", "From 52w high", "Off low"),
+}
+
+
+def _head(view: str) -> str:
+    trend, key, right = HEADERS[view]
+    return (f'<div class="sm-head-row"><span class="sm-h-id">Stock</span>'
+            f'<span class="sm-h-spark">{trend}</span><span class="sm-key">{key}</span>'
+            f'<span class="sm-right">{right}</span></div>')
+
+
 def rows_html(df: pd.DataFrame, view: str, market: str, session: pd.Timestamp | None) -> str:
     if df.empty:
         return '<div class="sm-empty">No stocks match right now.</div>'
     rows = "".join(_row(r, view, market, session) for _, r in df.iterrows())
-    return f'<div class="sm-card">{rows}</div>'
+    return f'<div class="sm-card">{_head(view)}{rows}</div>'

@@ -7,7 +7,7 @@ from stockmonitor import config
 from ui import data
 from ui import render
 
-MARKETS = {"🇺🇸 US": "US", "🇮🇳 India": "IN"}
+MARKETS = {"US": "US", "India": "IN"}
 MARKET_NAME = {"US": "US", "IN": "India"}
 ALL = "All"
 TILES = [

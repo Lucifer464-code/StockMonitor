@@ -90,3 +90,26 @@ def test_rows_embed_sparkline_as_image():
     out = rows_html(_df(), "pth", "US", SESSION)
     assert "<svg" not in out
     assert '<img class="sm-spark" src="data:image/svg+xml;base64,' in out
+
+
+def test_column_headers_per_view():
+    expected = {
+        "pth": ["Stock", "1M trend", "From 52w high", "Price · 1W"],
+        "ath": ["Stock", "1M trend", "From ATH", "Price · 1W"],
+        "fallen": ["Stock", "3M trend", "From 52w high", "Off low"],
+    }
+    for view, labels in expected.items():
+        out = rows_html(_df(), view, "US", SESSION)
+        head = out[out.index('<div class="sm-head-row">'):out.index('<details')]
+        for label in labels:
+            assert f">{label}<" in head, (view, label)
+    assert "sm-head-row" not in rows_html(_df().iloc[0:0], "pth", "US", SESSION)
+
+
+def test_fallen_low_days_not_truncated():
+    out = rows_html(_df(Name="A Very Long Company Name Holdings Incorporated"), "fallen", "US", SESSION)
+    assert '<div class="sm-when">low 18 days ago</div>' in out
+    # the truncating subtitle must not contain the days
+    import re
+    for sub in re.findall(r'<div class="sm-sub[^"]*">(.*?)</div>', out):
+        assert "days ago" not in sub

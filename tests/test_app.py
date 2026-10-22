@@ -79,7 +79,8 @@ def test_index_filter_changes_counts(monkeypatch):
 
 def test_market_switch_changes_index_options(monkeypatch):
     at = _run(monkeypatch)
-    at.segmented_control(key="market").set_value("🇮🇳 India").run()
+    assert at.segmented_control(key="market").options == ["US", "India"]
+    at.segmented_control(key="market").set_value("India").run()
     assert at.selectbox(key="index_IN").options == ["NIFTY 500", "All"]
     assert at.calls[-1] == "IN"
 
@@ -119,6 +120,6 @@ def test_load_failure_shows_message(monkeypatch):
     at = _run(monkeypatch, fail=True)
     assert any("Data for US isn't available yet." in i.value for i in at.info)
     assert "0" in _tile(at, "pth").label
-    at.segmented_control(key="market").set_value("🇮🇳 India").run()
+    at.segmented_control(key="market").set_value("India").run()
     assert not at.exception
     assert any("Data for India isn't available yet." in i.value for i in at.info)
