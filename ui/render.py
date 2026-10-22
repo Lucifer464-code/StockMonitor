@@ -178,8 +178,12 @@ def _row(r, view: str, market: str, session) -> str:
     listed = ""
     if not _nan(r["ListedDate"]):
         d = pd.Timestamp(r["ListedDate"])
-        listed = f'<div class="sm-listed">Listed {d.strftime("%b")} {d.day}, {d.year}</div>'
-    facts = [f'<span>All-time high <b>{e(fmt_price(r["ATH"], market))}</b></span>',
+        text = f'Listed {d.strftime("%b")} {d.day}, {d.year}'
+        listed = f'<div class="sm-listed">{text}</div>'
+        # A short history explains a high; say so without opening the row.
+        when += f'<div class="sm-when">{text}</div>'
+    facts = [f'<span>Price <b>{e(fmt_price(r["Price"], market))}</b></span>',
+             f'<span>All-time high <b>{e(fmt_price(r["ATH"], market))}</b></span>',
              f'<span>Market cap <b>{e(mc)}</b></span>']
     if not _nan(r["InIndex"]) and bool(r["InIndex"]):
         facts.append(f"<span>In <b>{e(INDEX_LABEL[market])}</b></span>")

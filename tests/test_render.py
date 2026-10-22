@@ -113,3 +113,21 @@ def test_fallen_low_days_not_truncated():
     import re
     for sub in re.findall(r'<div class="sm-sub[^"]*">(.*?)</div>', out):
         assert "days ago" not in sub
+
+
+def _summary(out):
+    return out[out.index("<summary>"):out.index("</summary>")]
+
+
+def test_listed_note_in_collapsed_row_every_view():
+    for view in ("pth", "ath", "fallen"):
+        out = rows_html(_df(ListedDate=pd.Timestamp("2026-03-04")), view, "US", SESSION)
+        assert '<div class="sm-when">Listed Mar 4, 2026</div>' in _summary(out), view
+    assert "Listed" not in _summary(rows_html(_df(), "fallen", "US", SESSION))
+
+
+def test_price_is_first_fact_every_view():
+    for view in ("pth", "ath", "fallen"):
+        out = rows_html(_df(), view, "US", SESSION)
+        facts = out[out.index('<div class="sm-facts">'):]
+        assert facts.startswith('<div class="sm-facts"><span>Price <b>$125.00</b></span>'), view
