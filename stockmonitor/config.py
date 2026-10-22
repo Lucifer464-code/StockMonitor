@@ -32,3 +32,21 @@ COLUMNS = [
     "R6M", "R1Y", "R3Y", "InIndex", "IsPTH", "IsATH", "IsFallen", "Spark",
     "ListedDate",
 ]
+
+# Universe sources and caching.
+US_SCREEN_PAGE_SIZE = 250          # yfinance's per-request maximum
+IN_SCREEN_MARGIN = 0.8             # screen at 0.8 x floor, apply the exact floor later
+UNIVERSE_TTL_H = 24
+INDEX_TTL_H = 168
+FAST_INFO_PAUSE_S = 0.15
+NIFTY_TOTAL_MARKET_URL = (
+    "https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
+)
+NIFTY_500_URL = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
+SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
+# Recently listed stocks not yet in NSE's constituent CSV: {SYMBOL: Company Name}.
+IN_MANUAL_ADDITIONS = {"SEDEMAC": "SEDEMAC Mechatronics Ltd."}
