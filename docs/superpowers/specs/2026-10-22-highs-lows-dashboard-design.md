@@ -26,13 +26,19 @@ US: *S&P 500* or *All*; India: *NIFTY 500* or *All*.
 
 | View | Who qualifies |
 |---|---|
-| **PTH** (near 52-week high) | Price within 5% of its 52-week high. |
-| **ATH** (near all-time high) | Price within 5% of its all-time high. Same rule as today's ATH sheets (`ATH_THRESHOLD = 0.05`, full price history). |
-| **Fallen from PTH** | Price is **down 80–90% from its 52-week high** (price / 52w high between 0.10 and 0.20), **and** it has **not made a new 52-week low in the past 2 weeks** (10 trading sessions): the 52-week low was set more than 10 sessions ago. |
+Tabs, in this order:
 
-The user said "down 80–90%" and confirmed that reading over "trading at
-80–90% of the high". They were shown that this leaves few stocks (on Oct 19:
-5 US at $1B+, 2 India, before the 2-week rule) and chose to keep it.
+| View | Who qualifies |
+|---|---|
+| **PTH** (near 52-week high) | Price within 10% of its 52-week high. |
+| **Fallen from PTH** | Price at **80–90% of its 52-week high**: more than 10% and at most 20% below it. A stock exactly 10% down is PTH, so the two never overlap. |
+| **ATH** (near all-time high) | Price within 5% of its all-time high. Same rule as today's ATH sheets (`ATH_THRESHOLD = 0.05`, full price history). |
+
+*Changed 2026-10-22 (user):* PTH widened from 5% to 10%. Fallen was first
+built as "down 80–90%, no new 52-week low in 2 weeks"; the user meant the
+opposite (at 80–90% of the high, i.e. down 10–20%) and dropped the 2-week
+rule, which filters nothing at that depth. Tab order changed to PTH,
+Fallen, ATH.
 
 ### Universe and size floors
 

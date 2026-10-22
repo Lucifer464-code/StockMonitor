@@ -12,12 +12,9 @@ from stockmonitor.universe import Stock
 _FLAGS = ("IsPTH", "IsATH", "IsFallen")
 
 
-def _would_be_fallen(m: dict, close: pd.Series, session: pd.Timestamp) -> bool:
-    """Fallen on depth and recency alone, ignoring the corporate-action screen."""
-    c = close[close.index <= session]
-    recent_start = c.index[-min(config.NO_NEW_LOW_SESSIONS, len(c))]
-    return (config.FALLEN_MIN_PCT <= -m["FromHigh52"] <= config.FALLEN_MAX_PCT
-            and m["Low52Date"] < recent_start)
+def _would_be_fallen(m: dict) -> bool:
+    """Fallen on depth alone, ignoring the corporate-action screen."""
+    return config.FALLEN_MIN_PCT < -m["FromHigh52"] <= config.FALLEN_MAX_PCT
 
 
 def build_rows(stocks: list[Stock], members: set[str] | None,
@@ -67,7 +64,7 @@ def build_rows(stocks: list[Stock], members: set[str] | None,
             if m is None:
                 continue
             priced += 1
-            if m["GapScreened"] and _would_be_fallen(m, close, session):
+            if m["GapScreened"] and _would_be_fallen(m):
                 screened.append(stock.ticker)
             if not any(m[f] for f in _FLAGS):
                 continue

@@ -6,10 +6,10 @@ TABS = {"US": "H&L US", "IN": "H&L India"}
 US_MCAP_FLOOR = 1_000_000_000      # USD
 IN_MCAP_FLOOR = 5_000_000_000      # INR (500 Cr)
 
-NEAR_HIGH_PCT = 5.0
-FALLEN_MIN_PCT = 80.0
-FALLEN_MAX_PCT = 90.0
-NO_NEW_LOW_SESSIONS = 10
+PTH_PCT = 10.0       # PTH: within 10% of the 52-week high
+ATH_PCT = 5.0        # ATH: within 5% of the all-time high
+FALLEN_MIN_PCT = 10.0  # Fallen: more than 10% ...
+FALLEN_MAX_PCT = 20.0  # ... and at most 20% below the 52-week high
 GAP_SCREEN_PCT = 50.0
 
 SPARK_POINTS = 63

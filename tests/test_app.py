@@ -168,3 +168,10 @@ def test_load_failure_logged_with_traceback(monkeypatch, capsys):
     _run(monkeypatch, fail=True)
     err = capsys.readouterr().err
     assert "Traceback" in err and "RuntimeError: tab missing" in err
+
+
+def test_tiles_in_order_with_current_rules(monkeypatch):
+    at = _run(monkeypatch)
+    labels = [b.label for b in at.button if (b.key or "").startswith("btn_")]
+    assert [l.split("\n")[0] for l in labels] == ["Near 52w high", "Fallen from PTH", "All-time high"]
+    assert "within 10%" in labels[0] and "down 10–20%" in labels[1] and "within 5%" in labels[2]

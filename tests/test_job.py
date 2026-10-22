@@ -106,8 +106,8 @@ FLAT = make_series([100.0] * 150 + [150.0] * 50 + [100.0] * 100)  # high 150, pr
 
 
 def fallen_series():
-    # Peak 100, decline to 12 early, flat since: down 88%, low not recent.
-    vals = [100.0] * 50 + list(np.linspace(100, 12, 50)) + [12.0] * 5 + [12.5] * 195
+    # Peak 100, eased to 85: at 85% of the 52-week high.
+    vals = [60.0] * 100 + [100.0] * 50 + list(np.linspace(100, 85, 150))
     return make_series(vals)
 
 
@@ -178,7 +178,7 @@ def test_build_rows_survives_none_download_and_bad_series(monkeypatch):
 
 
 def test_build_rows_logs_screened(monkeypatch):
-    vals = [100.0] * 50 + [20.0] * 10 + [12.0] * 5 + [12.5] * 235  # 80% one-day gap
+    vals = [100.0] * 50 + [40.0] * 10 + list(np.linspace(40, 85, 240))  # 60% one-day gap
     patch(monkeypatch, {"AAA": make_series(vals)})
     rows, stats = build_rows(stocks("AAA"), None, SESSION)
     assert rows == [] and stats["screened"] == ["AAA"]

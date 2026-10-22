@@ -41,14 +41,9 @@ def compute_metrics(close: pd.Series, session: pd.Timestamp) -> dict | None:
     ratios = window.to_numpy()[1:] / window.to_numpy()[:-1]
     gap = bool((ratios < 1.0 - config.GAP_SCREEN_PCT / 100.0).any())
 
-    recent_start = c.index[-min(config.NO_NEW_LOW_SESSIONS, len(c))]
-    no_new_low = low52_date < recent_start
-
-    is_fallen = (
-        config.FALLEN_MIN_PCT <= -from_high <= config.FALLEN_MAX_PCT
-        and no_new_low
-        and not gap
-    )
+    # Strictly more than FALLEN_MIN below the high, so a stock exactly 10%
+    # down is PTH and never in both tabs.
+    is_fallen = config.FALLEN_MIN_PCT < -from_high <= config.FALLEN_MAX_PCT and not gap
 
     first = c.index[0]
     listed = first if (session - first) < pd.Timedelta(days=365) else None
@@ -69,8 +64,8 @@ def compute_metrics(close: pd.Series, session: pd.Timestamp) -> dict | None:
         "R6M": _return_since(c, session, pd.DateOffset(months=6)),
         "R1Y": _return_since(c, session, pd.DateOffset(years=1)),
         "R3Y": _return_since(c, session, pd.DateOffset(years=3)),
-        "IsPTH": from_high >= -config.NEAR_HIGH_PCT,
-        "IsATH": from_ath >= -config.NEAR_HIGH_PCT,
+        "IsPTH": from_high >= -config.PTH_PCT,
+        "IsATH": from_ath >= -config.ATH_PCT,
         "IsFallen": bool(is_fallen),
         "Spark": ",".join(f"{v:.2f}" for v in c.iloc[-config.SPARK_POINTS:]),
         "ListedDate": listed,

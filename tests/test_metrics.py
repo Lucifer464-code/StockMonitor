@@ -17,16 +17,23 @@ def rising(n, top=100.0, last=None):
     return v
 
 
-def test_pth_within_5pct():
-    s = make_series(rising(300, last=96))
+def test_pth_within_10pct():
+    s = make_series(rising(300, last=91))
     m = compute_metrics(s, SESSION)
-    assert m["FromHigh52"] == pytest.approx(-4.0)
-    assert m["IsPTH"]
+    assert m["FromHigh52"] == pytest.approx(-9.0)
+    assert m["IsPTH"] and not m["IsFallen"]
 
 
 def test_pth_boundary():
-    assert compute_metrics(make_series(rising(300, last=95.0)), SESSION)["IsPTH"]
-    assert not compute_metrics(make_series(rising(300, last=94.9)), SESSION)["IsPTH"]
+    assert compute_metrics(make_series(rising(300, last=90.0)), SESSION)["IsPTH"]
+    assert not compute_metrics(make_series(rising(300, last=89.9)), SESSION)["IsPTH"]
+
+
+def test_ath_stays_within_5pct():
+    # Here the all-time high is the 52-week high: 94 is PTH (within 10%) but not ATH.
+    m = compute_metrics(make_series(rising(300, last=94.0)), SESSION)
+    assert m["IsPTH"] and not m["IsATH"]
+    assert compute_metrics(make_series(rising(300, last=95.0)), SESSION)["IsATH"]
 
 
 def test_ath_uses_full_history():
@@ -38,38 +45,36 @@ def test_ath_uses_full_history():
     assert m["FromATH"] == pytest.approx(-50.5)
 
 
-def fallen_series(low_ago, last):
-    v = [100.0] * 100 + list(np.linspace(100, 20, 180))   # 280 closes, no gaps
-    v += [20.0] * 20                                      # 300 closes
-    v[-1 - low_ago] = 12.0
-    v[-1] = last
-    return make_series(v)
+def test_fallen_is_80_to_90pct_of_the_high():
+    m = compute_metrics(make_series(rising(300, last=85.0)), SESSION)
+    assert m["FromHigh52"] == pytest.approx(-15.0)
+    assert m["IsFallen"] and not m["IsPTH"]
 
 
-def test_fallen_true():
-    m = compute_metrics(fallen_series(20, 15.0), SESSION)
-    assert m["FromHigh52"] == pytest.approx(-85.0)
+def test_fallen_band_edges_never_overlap_pth():
+    def flags(last):
+        m = compute_metrics(make_series(rising(300, last=last)), SESSION)
+        return m["IsPTH"], m["IsFallen"]
+    assert flags(90.0) == (True, False)    # exactly 10% down is PTH
+    assert flags(89.9) == (False, True)
+    assert flags(80.0) == (False, True)    # exactly 20% down is still Fallen
+    assert flags(79.9) == (False, False)
+
+
+def test_fallen_needs_no_recent_low_rule():
+    # Fell to 85 and kept sliding to a fresh 52-week low today: still Fallen.
+    v = [50.0] * 100 + [100.0] + [99.0] * 150 + list(np.linspace(99, 86, 48)) + [85.0]
+    v[:100] = [90.0] * 100  # keep every earlier close above today's 85
+    m = compute_metrics(make_series(v), SESSION)
+    assert m["Low52"] == pytest.approx(85.0)
     assert m["IsFallen"]
-    assert m["OffLow52"] == pytest.approx(25.0)
-
-
-def test_fallen_recent_low_excluded():
-    m = compute_metrics(fallen_series(5, 15.0), SESSION)
-    assert m["FromHigh52"] == pytest.approx(-85.0)
-    assert not m["IsFallen"]
-
-
-def test_fallen_band_edges():
-    assert not compute_metrics(fallen_series(20, 25.0), SESSION)["IsFallen"]
-    assert not compute_metrics(fallen_series(20, 9.0), SESSION)["IsFallen"]
-    assert compute_metrics(fallen_series(20, 20.0), SESSION)["IsFallen"]
 
 
 def test_gap_screened():
-    v = [100.0] * 100 + [40.0] * 200   # 100 -> 40 is ratio 0.4
-    v[-1] = 15.0
-    v[-30] = 12.0
+    # A one-day 60% drop inside the year, then a recovery to 85% of the high.
+    v = [100.0] * 100 + [40.0] * 50 + list(np.linspace(40, 85, 150))
     m = compute_metrics(make_series(v), SESSION)
+    assert m["FromHigh52"] == pytest.approx(-15.0)
     assert m["GapScreened"] and not m["IsFallen"]
 
 

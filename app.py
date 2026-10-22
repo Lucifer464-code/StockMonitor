@@ -12,9 +12,9 @@ MARKETS = {"US": "US", "India": "IN"}
 MARKET_NAME = {"US": "US", "IN": "India"}
 ALL = "All"
 TILES = [
-    ("pth", "Near 52w high", "PTH · within 5%"),
+    ("pth", "Near 52w high", "PTH · within 10%"),
+    ("fallen", "Fallen from PTH", "down 10–20%"),
     ("ath", "All-time high", "ATH · within 5%"),
-    ("fallen", "Fallen, stabilising", "down 80–90%"),
 ]
 
 PAGE_CSS = """<style>
