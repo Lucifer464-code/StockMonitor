@@ -70,3 +70,28 @@ def test_latest_settled_session_drops_today_when_open(monkeypatch):
     assert latest_settled_session("US") == today - pd.Timedelta(days=1)
     monkeypatch.setattr(history, "is_market_open", lambda m: False)
     assert latest_settled_session("US") == today
+
+
+def _closes(n, with_latest, latest="2026-10-16", prior="2026-10-15"):
+    out = {}
+    for i in range(n):
+        dates = [prior] + ([latest] if i < with_latest else [])
+        out[f"S{i}"] = pd.Series([1.0] * len(dates), index=pd.to_datetime(dates))
+    return out
+
+
+def test_consensus_session_skips_minority_date():
+    assert history.consensus_session(_closes(10, 7), None) == pd.Timestamp("2026-10-15")
+
+
+def test_consensus_session_latest_when_majority():
+    assert history.consensus_session(_closes(10, 9), None) == pd.Timestamp("2026-10-16")
+
+
+def test_consensus_session_respects_upper():
+    got = history.consensus_session(_closes(10, 10), pd.Timestamp("2026-10-15"))
+    assert got == pd.Timestamp("2026-10-15")
+
+
+def test_consensus_session_none():
+    assert history.consensus_session({}, None) is None

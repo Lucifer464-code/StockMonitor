@@ -20,9 +20,13 @@ def _would_be_fallen(m: dict, close: pd.Series, session: pd.Timestamp) -> bool:
 
 
 def build_rows(stocks: list[Stock], members: set[str] | None,
-               session: pd.Timestamp) -> tuple[list[dict], dict]:
-    rows, screened = [], []
-    priced = 0
+               reference_session: pd.Timestamp | None) -> tuple[list[dict], dict]:
+    """Download every batch, settle on a consensus session, then compute metrics.
+
+    stats["session"] is the pricing session actually used (None if no date
+    reaches consensus, in which case nothing is priced).
+    """
+    closes: dict[str, pd.Series] = {}
     n_batches = math.ceil(len(stocks) / config.PRICE_BATCH_SIZE)
     for i in range(n_batches):
         batch = stocks[i * config.PRICE_BATCH_SIZE:(i + 1) * config.PRICE_BATCH_SIZE]
@@ -34,29 +38,40 @@ def build_rows(stocks: list[Stock], members: set[str] | None,
         for stock in batch if data is not None else []:
             try:
                 close = history.extract_close(data, stock.symbol, n_syms)
-                if close.empty:
-                    continue
-                m = metrics.compute_metrics(close, session)
-                if m is None:
-                    continue
-                got += 1
-                if m["GapScreened"] and _would_be_fallen(m, close, session):
-                    screened.append(stock.ticker)
-                if not any(m[f] for f in _FLAGS):
-                    continue
-                row = {k: v for k, v in m.items() if k != "GapScreened"}
-                row.update(
-                    Ticker=stock.ticker, Name=stock.name, MarketCap=stock.mcap,
-                    InIndex="" if members is None else stock.symbol in members,
-                )
-                rows.append({c: row[c] for c in config.COLUMNS})
             except Exception as e:
                 print(f"  [WARN] {stock.symbol}: {type(e).__name__}: {e}")
-        priced += got
+                continue
+            if not close.empty:
+                closes[stock.symbol] = close
+                got += 1
         flag = "" if got >= len(batch) * 0.8 else "  [LOW YIELD]"
         print(f"  Batch {i + 1}/{n_batches}... {got}/{len(batch)}{flag}")
-    stats = {"universe": len(stocks), "priced": priced,
-             "stale": len(stocks) - priced, "screened": screened}
+
+    session = history.consensus_session(closes, upper=reference_session)
+    rows, screened, priced = [], [], 0
+    for stock in stocks if session is not None else []:
+        close = closes.get(stock.symbol)
+        if close is None:
+            continue
+        try:
+            m = metrics.compute_metrics(close, session)
+            if m is None:
+                continue
+            priced += 1
+            if m["GapScreened"] and _would_be_fallen(m, close, session):
+                screened.append(stock.ticker)
+            if not any(m[f] for f in _FLAGS):
+                continue
+            row = {k: v for k, v in m.items() if k != "GapScreened"}
+            row.update(
+                Ticker=stock.ticker, Name=stock.name, MarketCap=stock.mcap,
+                InIndex="" if members is None else stock.symbol in members,
+            )
+            rows.append({c: row[c] for c in config.COLUMNS})
+        except Exception as e:
+            print(f"  [WARN] {stock.symbol}: {type(e).__name__}: {e}")
+    stats = {"universe": len(stocks), "priced": priced, "stale": len(stocks) - priced,
+             "screened": screened, "session": session}
     return rows, stats
 
 
@@ -103,8 +118,8 @@ def run(markets: list[str]) -> int:
     code = 0
     for market in markets:
         print(f"\n=== {market} ===")
-        session = history.latest_settled_session(market)
-        if session is None:
+        reference = history.latest_settled_session(market)
+        if reference is None:
             print(f"  [ERROR] no settled session for {market}; skipping, nothing written")
             code = 1
             continue
@@ -115,7 +130,13 @@ def run(markets: list[str]) -> int:
             code = 1
             continue
         members = universe.index_members(market)
-        rows, stats = build_rows(stocks, members, session)
+        rows, stats = build_rows(stocks, members, reference)
+        session = stats["session"]
+        if session is None:
+            print(f"  [ERROR] no consensus session for {market}; nothing written")
+            code = 1
+            continue
+        print(f"  Reference session: {reference.date()}  Consensus session: {session.date()}")
         print(f"  Stale: {stats['stale']}")
         print(f"  Screened out of Fallen ({len(stats['screened'])}): "
               f"{', '.join(stats['screened']) or '-'}")

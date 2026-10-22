@@ -17,6 +17,7 @@ SPARK_SHORT = 22
 PRICE_BATCH_SIZE = 100
 COVERAGE_WARN = 0.90
 CACHE_DIR = "cache"
+CONSENSUS_SHARE = 0.8              # share of series that must have a bar on the pricing session
 
 US_EXCHANGES = ["NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS"]
 

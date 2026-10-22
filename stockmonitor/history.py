@@ -170,3 +170,19 @@ def extract_close(data: pd.DataFrame, symbol: str, n_symbols: int) -> pd.Series:
     if getattr(idx, "tz", None) is not None:
         idx = idx.tz_localize(None)
     return pd.Series(close.values, index=idx)
+
+
+def consensus_session(closes: dict, upper=None, min_share: float = config.CONSENSUS_SHARE):
+    """Latest date (<= upper) on which at least min_share of the non-empty
+    close series have a bar, or None.
+
+    Reference tickers can carry a bar that much of the market lacks (a feed
+    lag or a partial session); pricing to that date would mark the rest stale.
+    """
+    series = [s for s in closes.values() if len(s)]
+    if not series:
+        return None
+    counts = pd.Series([d.normalize() for s in series for d in s.index.unique()]).value_counts()
+    need = min_share * len(series)
+    ok = [d for d, n in counts.items() if n >= need and (upper is None or d <= upper)]
+    return max(ok) if ok else None

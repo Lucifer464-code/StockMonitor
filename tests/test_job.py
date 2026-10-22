@@ -106,18 +106,29 @@ def test_build_rows_keeps_flagged_only(monkeypatch):
 
 def test_build_rows_counts_stale(monkeypatch):
     short = make_series([10.0] * 50, end="2026-10-14")
-    patch(monkeypatch, {"AAA": PTH, "BBB": short})
-    rows, stats = build_rows(stocks("AAA", "BBB"), None, SESSION)
-    assert stats["stale"] == 1 and stats["priced"] == 1
+    patch(monkeypatch, {"AAA": PTH, "BBB": short, "CCC": PTH, "DDD": PTH, "EEE": PTH})
+    rows, stats = build_rows(stocks("AAA", "BBB", "CCC", "DDD", "EEE"), None, SESSION)
+    assert stats["stale"] == 1 and stats["priced"] == 4
+    assert stats["session"] == SESSION
+
+
+def test_build_rows_consensus_falls_back_a_day(monkeypatch):
+    lag = make_series([10.0] * 50, end="2026-10-15")
+    syms = [f"S{i}" for i in range(10)]
+    patch(monkeypatch, {s: (PTH if i < 7 else lag) for i, s in enumerate(syms)})
+    _, stats = build_rows(stocks(*syms), None, SESSION)
+    assert stats["session"] == pd.Timestamp("2026-10-15")
+    assert stats["stale"] == 0 and stats["priced"] == 10
 
 
 def test_build_rows_survives_none_download_and_bad_series(monkeypatch):
     monkeypatch.setattr(job.history, "download_batch", lambda syms, period="max": None)
     rows, stats = build_rows(stocks("AAA", "BBB"), None, SESSION)
     assert rows == [] and stats["stale"] == 2
-    patch(monkeypatch, {"AAA": PTH, "BBB": make_series([0.0] * 20)})
-    rows, stats = build_rows(stocks("AAA", "BBB"), None, SESSION)
-    assert [r["Ticker"] for r in rows] == ["AAA"] and stats["stale"] == 1
+    patch(monkeypatch, {"AAA": PTH, "BBB": make_series([0.0] * 20), "CCC": PTH,
+                        "DDD": PTH, "EEE": PTH})
+    rows, stats = build_rows(stocks("AAA", "BBB", "CCC", "DDD", "EEE"), None, SESSION)
+    assert "BBB" not in [r["Ticker"] for r in rows] and stats["stale"] == 1
 
 
 def test_build_rows_logs_screened(monkeypatch):
