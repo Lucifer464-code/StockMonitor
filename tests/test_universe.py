@@ -169,3 +169,88 @@ def test_index_members_stale_cache(monkeypatch, cache_dir):
 
     monkeypatch.setattr(universe.requests, "get", boom)
     assert index_members("US") == {"MSFT"}
+
+
+# ── Coverage guards: a bad fetch must not shrink the universe unseen ──
+
+def _us_pages(n, total=None):
+    """Fake yf.screen serving n distinct valid quotes, reporting `total` (default n)."""
+    quotes = [q("Q" + "".join(chr(65 + (i // 26 ** k) % 26) for k in range(3))) for i in range(n)]
+
+    def fake(query, offset=0, size=250, **k):
+        return {"quotes": quotes[offset:offset + size], "total": n if total is None else total}
+
+    return fake
+
+
+def _write_cache(cache_dir, name, n, hours=48):
+    path = cache_dir / f"{name}.pkl"
+    path.write_bytes(pickle.dumps([Stock(f"C{i}", f"C{i}", "Cached", 5e9) for i in range(n)]))
+    age_file(path, hours)
+    return path
+
+
+def test_us_screen_short_of_total_uses_stale_cache(monkeypatch, cache_dir, capsys):
+    path = _write_cache(cache_dir, "us_universe", 3)
+    before = path.read_bytes()
+    monkeypatch.setattr(universe.yf, "screen", _us_pages(260, total=600))
+    assert [s.ticker for s in us_universe()] == ["C0", "C1", "C2"]
+    assert path.read_bytes() == before
+    assert "260 of 600" in capsys.readouterr().out
+
+
+def test_us_screen_reaching_total_is_fresh(monkeypatch, cache_dir):
+    monkeypatch.setattr(universe.yf, "screen", _us_pages(260))
+    assert len(us_universe()) == 260
+
+
+def test_universe_shrink_keeps_previous_cache(monkeypatch, cache_dir, capsys):
+    path = _write_cache(cache_dir, "us_universe", 300)
+    before = path.read_bytes()
+    monkeypatch.setattr(universe.yf, "screen", _us_pages(260))
+    got = us_universe()
+    assert len(got) == 300 and got[0].ticker == "C0"
+    assert path.read_bytes() == before
+    out = capsys.readouterr().out
+    assert "[LOW COVERAGE] US universe 260 vs previous 300" in out
+    assert "using cached universe" in out
+
+
+def test_universe_small_shrink_accepted(monkeypatch, cache_dir):
+    _write_cache(cache_dir, "us_universe", 280)
+    monkeypatch.setattr(universe.yf, "screen", _us_pages(260))
+    assert len(us_universe()) == 260
+    assert len(pickle.loads((cache_dir / "us_universe.pkl").read_bytes())) == 260
+
+
+def test_india_empty_screener_uses_stale_cache(monkeypatch, cache_dir):
+    _write_cache(cache_dir, "in_universe", 2)
+    patch_india(monkeypatch, [], {})
+
+    swept = []
+    monkeypatch.setattr(universe.yf, "Ticker", lambda sym: swept.append(sym))
+    assert [s.ticker for s in india_universe()] == ["C0", "C1"]
+    assert swept == []
+
+
+def test_india_fast_info_failures_logged(monkeypatch, capsys):
+    # AAA from the screener; BBB and SEDEMAC fall back, and SEDEMAC fails.
+    patch_india(monkeypatch, [q("AAA.NS", 6e9)], {"BBB.NS": 7e9})
+    india_universe()
+    assert "fast_info fallback: 1 of 2 failed" in capsys.readouterr().out
+
+
+def test_india_skips_dummy_symbols(monkeypatch):
+    csv = NSE_CSV + "Dummy Ltd.,X,DUMMYXYZ,EQ,4\n"
+    patch_india(monkeypatch, [q("AAA.NS", 6e9)], {"BBB.NS": 7e9, "SEDEMAC.NS": 8e9})
+    monkeypatch.setattr(universe.requests, "get", lambda *a, **k: Resp(csv))
+    asked = []
+    real = universe.yf.Ticker
+
+    def spy(sym):
+        asked.append(sym)
+        return real(sym)
+
+    monkeypatch.setattr(universe.yf, "Ticker", spy)
+    tickers = {s.ticker for s in india_universe()}
+    assert "DUMMYXYZ" not in tickers and "DUMMYXYZ.NS" not in asked

@@ -47,8 +47,13 @@ def _save_cache(name, obj):
         print(f"  [WARN] could not save cache {name}: {e}")
 
 
-def _cached_fetch(name, ttl_h, fetch):
-    """Fresh cache, else fetch(); a stale cache is used only if the fetch fails."""
+def _cached_fetch(name, ttl_h, fetch, shrink_label=None):
+    """Fresh cache, else fetch(); a stale cache is used only if the fetch fails.
+
+    With shrink_label set, a fetch that comes back below UNIVERSE_SHRINK_LIMIT
+    of the previous cached result also counts as failed: a partial fetch must
+    not quietly drop stocks.
+    """
     fresh = _load_cache(name, ttl_h)
     if fresh:
         return fresh
@@ -56,25 +61,36 @@ def _cached_fetch(name, ttl_h, fetch):
         result = fetch()
         if not result:
             raise RuntimeError(f"{name}: empty result")
-        _save_cache(name, result)
-        return result
     except Exception as e:
         print(f"  [ERROR] {name} fetch failed: {e}")
         return _load_cache(name, None)
+    if shrink_label:
+        previous = _load_cache(name, None)
+        if previous and len(result) < config.UNIVERSE_SHRINK_LIMIT * len(previous):
+            print(f"  [LOW COVERAGE] {shrink_label} universe {len(result)} vs previous "
+                  f"{len(previous)} — using cached universe")
+            return previous
+    _save_cache(name, result)
+    return result
 
 
 # ── Screener ──────────────────────────────────────────────────
 
 def _screen_all(query):
-    quotes, offset = [], 0
+    """Every quote the screener matches. Raises if fewer come back than its total."""
+    quotes, offset, total = [], 0, None
     while True:
         resp = yf.screen(query, offset=offset, size=config.US_SCREEN_PAGE_SIZE,
                          sortField="intradaymarketcap", sortAsc=False)
         page = resp.get("quotes", []) or []
         quotes.extend(page)
-        if len(page) < config.US_SCREEN_PAGE_SIZE:
-            return quotes
+        total = resp.get("total", total)
+        if len(page) < config.US_SCREEN_PAGE_SIZE or (total is not None and len(quotes) >= total):
+            break
         offset += config.US_SCREEN_PAGE_SIZE
+    if total is not None and len(quotes) < total:
+        raise RuntimeError(f"screener returned {len(quotes)} of {total} quotes")
+    return quotes
 
 
 def _is_derivative(base, name):
@@ -111,7 +127,7 @@ def _fetch_us():
 
 
 def us_universe() -> list[Stock]:
-    return _cached_fetch("us_universe", config.UNIVERSE_TTL_H, _fetch_us) or []
+    return _cached_fetch("us_universe", config.UNIVERSE_TTL_H, _fetch_us, "US") or []
 
 
 # ── India ─────────────────────────────────────────────────────
@@ -143,24 +159,34 @@ def _fetch_india():
     ])
     caps = {str(qt.get("symbol", "")).upper(): qt.get("marketCap")
             for qt in _screen_all(query)}
+    if not caps:
+        # Never fall back to a per-stock fast_info sweep of the whole market.
+        raise RuntimeError("India screener returned no quotes")
 
-    stocks = []
+    stocks, asked, failed = [], 0, 0
     for ticker, name in names.items():
+        if ticker.startswith("DUMMY"):  # NSE placeholder rows, not listed stocks
+            continue
         sym = f"{ticker}.NS"
         mcap = caps.get(sym)
         if not mcap:
+            asked += 1
             try:
                 mcap = yf.Ticker(sym).fast_info.market_cap
             except Exception:
                 mcap = None
+            if not mcap:
+                failed += 1
             time.sleep(config.FAST_INFO_PAUSE_S)
         if mcap and mcap >= config.IN_MCAP_FLOOR:
             stocks.append(Stock(sym, ticker, name, float(mcap)))
+    if asked:
+        print(f"  fast_info fallback: {failed} of {asked} failed")
     return stocks
 
 
 def india_universe() -> list[Stock]:
-    return _cached_fetch("in_universe", config.UNIVERSE_TTL_H, _fetch_india) or []
+    return _cached_fetch("in_universe", config.UNIVERSE_TTL_H, _fetch_india, "India") or []
 
 
 # ── Index membership ──────────────────────────────────────────

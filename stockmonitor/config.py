@@ -38,6 +38,7 @@ COLUMNS = [
 US_SCREEN_PAGE_SIZE = 250          # yfinance's per-request maximum
 IN_SCREEN_MARGIN = 0.8             # screen at 0.8 x floor, apply the exact floor later
 UNIVERSE_TTL_H = 24
+UNIVERSE_SHRINK_LIMIT = 0.9        # a fresh universe below this share of the cached one is a failed fetch
 INDEX_TTL_H = 168
 FAST_INFO_PAUSE_S = 0.15
 NIFTY_TOTAL_MARKET_URL = (
