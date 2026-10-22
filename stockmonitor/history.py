@@ -6,22 +6,27 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from stockmonitor import config
 
+MARKET_TZ = {"US": "America/New_York", "IN": "Asia/Kolkata"}
+
+
+def _now(tz: str) -> datetime:
+    return datetime.now(ZoneInfo(tz))
+
 
 def is_market_open(market: str) -> bool:
     """Return True if the given market is currently in its regular session."""
     if market == "US":
-        tz = ZoneInfo("America/New_York")
-        now = datetime.now(tz)
+        now = _now(MARKET_TZ["US"])
         open_t = now.replace(hour=9, minute=30, second=0, microsecond=0)
         close_t = now.replace(hour=16, minute=0, second=0, microsecond=0)
     else:  # IN
-        tz = ZoneInfo("Asia/Kolkata")
-        now = datetime.now(tz)
+        now = _now(MARKET_TZ["IN"])
         open_t = now.replace(hour=9, minute=15, second=0, microsecond=0)
         close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
     return now.weekday() < 5 and open_t <= now <= close_t
@@ -40,7 +45,9 @@ def latest_settled_session(market: str = "US"):
     so today is excluded unless the market has closed.
     """
     refs = config.SESSION_REFERENCE.get(market, config.SESSION_REFERENCE["US"])
-    today = pd.Timestamp.now().normalize()
+    # "Today" is the market's own date, not the machine's: at 00:30 IST the
+    # US is still trading the previous calendar day.
+    today = pd.Timestamp(_now(MARKET_TZ.get(market, MARKET_TZ["US"]))).tz_localize(None).normalize()
     market_open = is_market_open(market)
 
     best = None
@@ -94,7 +101,7 @@ def download_batch(symbols: list, period: str = "max"):
         ok = 0
         for s in syms:
             try:
-                col = df[s]["Close"] if len(syms) > 1 else df["Close"]
+                col = df[s]["Close"] if isinstance(df.columns, pd.MultiIndex) else df["Close"]
                 if col.dropna().shape[0] >= 6:
                     ok += 1
             except Exception:
@@ -139,7 +146,9 @@ def download_batch(symbols: list, period: str = "max"):
             if sub is not None and not sub.empty:
                 for s in chunk:
                     try:
-                        merged[s] = sub[s] if len(chunk) > 1 else sub
+                        # Even a one-symbol chunk may come back ticker-grouped;
+                        # store the symbol's own frame so every entry matches.
+                        merged[s] = sub[s] if isinstance(sub.columns, pd.MultiIndex) else sub
                     except Exception:
                         pass
             time.sleep(1)
@@ -178,11 +187,15 @@ def consensus_session(closes: dict, upper=None, min_share: float = config.CONSEN
 
     Reference tickers can carry a bar that much of the market lacks (a feed
     lag or a partial session); pricing to that date would mark the rest stale.
+    Only the last CONSENSUS_WINDOW_DAYS up to upper (or up to the newest bar,
+    if upper is None) are considered.
     """
     series = [s for s in closes.values() if len(s)]
     if not series:
         return None
-    counts = pd.Series([d.normalize() for s in series for d in s.index.unique()]).value_counts()
-    need = min_share * len(series)
-    ok = [d for d, n in counts.items() if n >= need and (upper is None or d <= upper)]
-    return max(ok) if ok else None
+    end = (max(s.index.max() for s in series) if upper is None else pd.Timestamp(upper)).normalize()
+    cutoff = end - pd.Timedelta(days=config.CONSENSUS_WINDOW_DAYS)
+    days = [s.index[s.index >= cutoff].normalize().unique() for s in series]
+    counts = pd.Series(np.concatenate([d.values for d in days])).value_counts()
+    counts = counts[(counts.index <= end) & (counts >= min_share * len(series))]
+    return pd.Timestamp(counts.index.max()) if len(counts) else None

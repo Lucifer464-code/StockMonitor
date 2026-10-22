@@ -62,7 +62,11 @@ def test_extract_close_missing_symbol_empty():
 
 
 def test_latest_settled_session_drops_today_when_open(monkeypatch):
-    today = pd.Timestamp.now().normalize()
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    frozen = datetime(2026, 10, 16, 12, 0, tzinfo=ZoneInfo("America/New_York"))
+    monkeypatch.setattr(history, "_now", lambda tz: frozen.astimezone(ZoneInfo(tz)))
+    today = pd.Timestamp("2026-10-16")
     idx = pd.DatetimeIndex([today - pd.Timedelta(days=2), today - pd.Timedelta(days=1), today])
     hist = pd.DataFrame({"Close": [1.0, 2.0, 3.0]}, index=idx)
     monkeypatch.setattr(history.yf, "download", lambda *a, **k: hist)
@@ -84,8 +88,37 @@ def test_consensus_session_skips_minority_date():
     assert history.consensus_session(_closes(10, 7), None) == pd.Timestamp("2026-10-15")
 
 
-def test_consensus_session_latest_when_majority():
-    assert history.consensus_session(_closes(10, 9), None) == pd.Timestamp("2026-10-16")
+def test_consensus_session_latest_when_nearly_all():
+    assert history.consensus_session(_closes(20, 19), None) == pd.Timestamp("2026-10-16")
+
+
+def test_consensus_session_skips_90pct_latest_for_full_prior_day():
+    # 90% would clear the coverage warning, but a fresher partial list is worse
+    # than a complete one a day older.
+    assert history.consensus_session(_closes(10, 9), None) == pd.Timestamp("2026-10-15")
+
+
+def test_consensus_share_not_below_coverage_warn():
+    from stockmonitor import config
+    assert config.CONSENSUS_SHARE >= config.COVERAGE_WARN
+
+
+def test_consensus_session_ignores_dates_older_than_window():
+    old = {f"S{i}": pd.Series([1.0], index=pd.to_datetime(["2026-08-01"])) for i in range(5)}
+    assert history.consensus_session(old, pd.Timestamp("2026-10-16")) is None
+    # Without an upper bound the window ends at the newest bar in the data.
+    old["S0"] = pd.Series([1.0, 1.0], index=pd.to_datetime(["2026-08-01", "2026-10-16"]))
+    assert history.consensus_session(old, None) is None
+
+
+def test_consensus_session_fast_on_full_market():
+    import time
+    idx = pd.bdate_range(end="2026-10-16", periods=5000)
+    closes = {f"S{i}": pd.Series(np.ones(5000), index=idx) for i in range(600)}
+    t0 = time.perf_counter()
+    got = history.consensus_session(closes, pd.Timestamp("2026-10-16"))
+    assert time.perf_counter() - t0 < 2.0
+    assert got == pd.Timestamp("2026-10-16")
 
 
 def test_consensus_session_respects_upper():
@@ -95,3 +128,37 @@ def test_consensus_session_respects_upper():
 
 def test_consensus_session_none():
     assert history.consensus_session({}, None) is None
+
+
+def test_latest_settled_session_uses_market_timezone(monkeypatch):
+    # 00:30 IST on Tue Oct 20 is 15:00 Mon Oct 19 in New York: the US session
+    # is still open, so Monday's bar is live and must be excluded.
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    frozen = datetime(2026, 10, 20, 0, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
+    monkeypatch.setattr(history, "_now", lambda tz: frozen.astimezone(ZoneInfo(tz)), raising=False)
+    hist = pd.DataFrame({"Close": [1.0, 2.0]},
+                        index=pd.DatetimeIndex(["2026-10-16", "2026-10-19"]))
+    monkeypatch.setattr(history.yf, "download", lambda *a, **k: hist)
+    assert latest_settled_session("US") == pd.Timestamp("2026-10-16")
+
+
+def _single(sym, n=10, multi=True):
+    df = full_frame([sym], n)
+    return df if multi else df[sym]
+
+
+def test_download_split_one_symbol_chunk_keeps_two_levels(monkeypatch):
+    syms = [f"S{i}" for i in range(51)]  # chunks of 50 and 1
+    for multi in (True, False):
+        def fake_download(batch, *a, **k):
+            if len(batch) > 50:
+                return nan_frame(batch)
+            return _single(batch[0], multi=multi) if len(batch) == 1 else full_frame(batch)
+
+        monkeypatch.setattr(history.yf, "download", fake_download)
+        monkeypatch.setattr(history.time, "sleep", lambda s: None)
+        out = download_batch(syms)
+        assert out.columns.nlevels == 2, multi
+        assert set(out.columns.get_level_values(0)) == set(syms)
+        assert not extract_close(out, "S50", 2).empty

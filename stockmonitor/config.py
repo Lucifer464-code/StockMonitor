@@ -17,7 +17,8 @@ SPARK_SHORT = 22
 PRICE_BATCH_SIZE = 100
 COVERAGE_WARN = 0.90
 CACHE_DIR = "cache"
-CONSENSUS_SHARE = 0.8              # share of series that must have a bar on the pricing session
+CONSENSUS_SHARE = 0.95             # share of series that must have a bar on the pricing session (>= COVERAGE_WARN)
+CONSENSUS_WINDOW_DAYS = 30         # calendar days before the reference session searched for it
 
 US_EXCHANGES = ["NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS"]
 
