@@ -32,57 +32,34 @@ def is_market_open(market: str) -> bool:
     return now.weekday() < 5 and open_t <= now <= close_t
 
 
-def latest_settled_session(market: str = "US"):
-    """The most recent SETTLED session for a market, as a normalised date.
+def settled_upper(market: str) -> pd.Timestamp:
+    """The newest date whose close can be settled, in the market's own timezone.
 
-    Individual tickers cannot be trusted to answer this: a thinly traded
-    name may simply have no bar for a session, so letting each row use its
-    own newest bar mixes sessions within one table. Resolve it once from
-    liquid references and hold every row to it.
-
-    A session counts as settled only once its close exists. Mid-session the
-    provider already carries today's bar with a live, still-moving close,
-    so today is excluded unless the market has closed.
+    While the market is trading, today's prices are still moving, so the cap
+    is yesterday; at any other time it is today (before the open nothing for
+    today exists yet, after the close today's close is final). The consensus
+    session then picks the newest date at or before this that nearly every
+    stock has. Asking a few reference tickers for their newest close is not
+    enough: Yahoo's daily history often carries the latest session's row
+    with a blank close until hours later, for the references too.
     """
-    refs = config.SESSION_REFERENCE.get(market, config.SESSION_REFERENCE["US"])
-    # "Today" is the market's own date, not the machine's: at 00:30 IST the
-    # US is still trading the previous calendar day.
-    today = pd.Timestamp(_now(MARKET_TZ.get(market, MARKET_TZ["US"]))).tz_localize(None).normalize()
-    market_open = is_market_open(market)
+    today = pd.Timestamp(_now(MARKET_TZ[market])).tz_localize(None).normalize()
+    return today - pd.Timedelta(days=1) if is_market_open(market) else today
 
-    best = None
-    for sym in refs:
-        try:
-            hist = yf.download(sym, period="1mo", auto_adjust=False,
-                               progress=False)
-            col = hist["Close"]
-            if hasattr(col, "columns"):
-                col = col.iloc[:, 0]
-            col = col.dropna()
-            if col.empty:
-                continue
-            idx = col.index
-            idx = idx.tz_localize(None) if getattr(idx, "tz", None) is not None else idx
-            dates = [d.normalize() for d in idx]
-            # Drop today while the session is still running: its close has
-            # not settled yet.
-            if market_open:
-                dates = [d for d in dates if d < today]
-            if not dates:
-                continue
-            cand = max(dates)
-            if best is None or cand > best:
-                best = cand
-        except Exception:
-            continue
 
-    if best is not None:
-        print(f"  Pricing session: {best.date()} "
-              f"({'market open, today excluded' if market_open else 'market closed'})")
-    else:
-        print("  [WARN] could not resolve a pricing session from reference "
-              "tickers; falling back to each ticker's newest settled bar.")
-    return best
+def fill_from_quote(close: pd.Series, quote, upper: pd.Timestamp) -> pd.Series:
+    """Add a quote's price as its session's close when the history lags it.
+
+    `quote` is (price, session date) from universe.latest_quotes. It only ever
+    appends a session newer than the history's last close and no later than
+    `upper`, so it never overwrites a real close or brings in a live price.
+    """
+    if close.empty or not quote:
+        return close
+    price, day = quote
+    if not price or price <= 0 or day > upper or day <= close.index[-1].normalize():
+        return close
+    return pd.concat([close, pd.Series([float(price)], index=[day])])
 
 
 def download_batch(symbols: list, period: str = "max"):

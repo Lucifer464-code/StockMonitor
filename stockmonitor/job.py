@@ -21,13 +21,17 @@ def _would_be_fallen(m: dict, close: pd.Series, session: pd.Timestamp) -> bool:
 
 
 def build_rows(stocks: list[Stock], members: set[str] | None,
-               reference_session: pd.Timestamp | None) -> tuple[list[dict], dict]:
+               upper: pd.Timestamp | None, quotes: dict | None = None) -> tuple[list[dict], dict]:
     """Download every batch, settle on a consensus session, then compute metrics.
 
+    `quotes` ({symbol: (price, session date)}) fills a session close that
+    Yahoo's history still shows blank; see history.fill_from_quote.
     stats["session"] is the pricing session actually used (None if no date
     reaches consensus, in which case nothing is priced).
     """
+    quotes = quotes or {}
     closes: dict[str, pd.Series] = {}
+    filled = 0
     n_batches = math.ceil(len(stocks) / config.PRICE_BATCH_SIZE)
     for i in range(n_batches):
         batch = stocks[i * config.PRICE_BATCH_SIZE:(i + 1) * config.PRICE_BATCH_SIZE]
@@ -43,12 +47,16 @@ def build_rows(stocks: list[Stock], members: set[str] | None,
                 print(f"  [WARN] {stock.symbol}: {type(e).__name__}: {e}")
                 continue
             if not close.empty:
+                if upper is not None:
+                    n = len(close)
+                    close = history.fill_from_quote(close, quotes.get(stock.symbol), upper)
+                    filled += len(close) > n
                 closes[stock.symbol] = close
                 got += 1
         flag = "" if got >= len(batch) * 0.8 else "  [LOW YIELD]"
         print(f"  Batch {i + 1}/{n_batches}... {got}/{len(batch)}{flag}")
 
-    session = history.consensus_session(closes, upper=reference_session)
+    session = history.consensus_session(closes, upper=upper)
     rows, screened, priced = [], [], 0
     for stock in stocks if session is not None else []:
         close = closes.get(stock.symbol)
@@ -72,7 +80,7 @@ def build_rows(stocks: list[Stock], members: set[str] | None,
         except Exception as e:
             print(f"  [WARN] {stock.symbol}: {type(e).__name__}: {e}")
     stats = {"universe": len(stocks), "priced": priced, "stale": len(stocks) - priced,
-             "screened": screened, "session": session}
+             "screened": screened, "session": session, "filled": filled}
     return rows, stats
 
 
@@ -145,17 +153,16 @@ def run(markets: list[str]) -> int:
 
 def _run_market(sh, market: str) -> int:
     """Price one market and write its tab. Returns 0, or 1 if nothing was written."""
-    reference = history.latest_settled_session(market)
-    if reference is None:
-        print(f"  [ERROR] no settled session for {market}; skipping, nothing written")
-        return 1
+    upper = history.settled_upper(market)
     stocks = universe.us_universe() if market == "US" else universe.india_universe()
     print(f"  Universe: {len(stocks)}")
     if not stocks:
         print(f"  [ERROR] empty universe for {market}; nothing written")
         return 1
     members = universe.index_members(market)
-    rows, stats = build_rows(stocks, members, reference)
+    quotes = universe.latest_quotes(market)
+    print(f"  Quotes: {len(quotes)}")
+    rows, stats = build_rows(stocks, members, upper, quotes=quotes)
     session = stats["session"]
     if session is None:
         print(f"  [ERROR] no consensus session for {market}; nothing written")
@@ -164,7 +171,8 @@ def _run_market(sh, market: str) -> int:
     # Measure coverage against something a bad run cannot shrink.
     previous = _previous_universe(ws)
     stats["expected"] = expected = max(stats["universe"], previous)
-    print(f"  Reference session: {reference.date()}  Consensus session: {session.date()}")
+    print(f"  Settled up to: {upper.date()}  Consensus session: {session.date()}  "
+          f"(closes filled from quotes: {stats.get('filled', 0)})")
     print(f"  Expected: {expected} (previous universe {previous})")
     print(f"  Stale: {stats['stale']}")
     print(f"  Screened out of Fallen ({len(stats['screened'])}): "

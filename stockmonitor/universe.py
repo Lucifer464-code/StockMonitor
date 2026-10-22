@@ -10,6 +10,7 @@ import requests
 import yfinance as yf
 
 from stockmonitor import config
+from stockmonitor.history import MARKET_TZ
 
 
 @dataclass
@@ -101,14 +102,17 @@ def _is_derivative(base, name):
 
 # ── US ────────────────────────────────────────────────────────
 
-def _fetch_us():
-    query = yf.EquityQuery("and", [
+def _us_query():
+    return yf.EquityQuery("and", [
         yf.EquityQuery("eq", ["region", "us"]),
         yf.EquityQuery("is-in", ["exchange", *config.US_EXCHANGES]),
         yf.EquityQuery("gte", ["intradaymarketcap", config.US_MCAP_FLOOR]),
     ])
+
+
+def _fetch_us():
     stocks, seen = [], set()
-    for qt in _screen_all(query):
+    for qt in _screen_all(_us_query()):
         t = str(qt.get("symbol", "")).strip().upper()
         if qt.get("quoteType") != "EQUITY" or not t or t in seen:
             continue
@@ -141,6 +145,15 @@ def _nse_csv(url):
     return df
 
 
+def _india_query():
+    return yf.EquityQuery("and", [
+        yf.EquityQuery("eq", ["region", "in"]),
+        yf.EquityQuery("eq", ["exchange", "NSI"]),
+        yf.EquityQuery("gte", ["intradaymarketcap",
+                               config.IN_SCREEN_MARGIN * config.IN_MCAP_FLOOR]),
+    ])
+
+
 def _fetch_india():
     df = _nse_csv(config.NIFTY_TOTAL_MARKET_URL)
     if "Series" in df.columns:
@@ -151,14 +164,8 @@ def _fetch_india():
     for sym, name in config.IN_MANUAL_ADDITIONS.items():
         names.setdefault(sym, name)
 
-    query = yf.EquityQuery("and", [
-        yf.EquityQuery("eq", ["region", "in"]),
-        yf.EquityQuery("eq", ["exchange", "NSI"]),
-        yf.EquityQuery("gte", ["intradaymarketcap",
-                               config.IN_SCREEN_MARGIN * config.IN_MCAP_FLOOR]),
-    ])
     caps = {str(qt.get("symbol", "")).upper(): qt.get("marketCap")
-            for qt in _screen_all(query)}
+            for qt in _screen_all(_india_query())}
     if not caps:
         # Never fall back to a per-stock fast_info sweep of the whole market.
         raise RuntimeError("India screener returned no quotes")
@@ -187,6 +194,33 @@ def _fetch_india():
 
 def india_universe() -> list[Stock]:
     return _cached_fetch("in_universe", config.UNIVERSE_TTL_H, _fetch_india, "India") or []
+
+
+# ── Latest quotes ─────────────────────────────────────────────
+
+def latest_quotes(market: str) -> dict:
+    """{symbol: (price, session date)} from the screener's current quotes.
+
+    Never cached: these fill in the newest session's close when Yahoo's daily
+    history still shows that row with a blank close. The date is the
+    market's own (a 16:00 ET close is Oct 21 in New York, Oct 22 in India).
+    Returns {} if the screener fails; the run then prices from history alone.
+    """
+    tz = MARKET_TZ[market]
+    try:
+        rows = _screen_all(_us_query() if market == "US" else _india_query())
+    except Exception as e:
+        print(f"  [WARN] {market} quotes unavailable: {type(e).__name__}: {e}")
+        return {}
+    quotes = {}
+    for qt in rows:
+        sym = str(qt.get("symbol", "")).strip().upper()
+        price, t = qt.get("regularMarketPrice"), qt.get("regularMarketTime")
+        if not sym or not price or not t:
+            continue
+        day = pd.Timestamp(t, unit="s", tz="UTC").tz_convert(tz).tz_localize(None).normalize()
+        quotes[sym] = (float(price), day)
+    return quotes
 
 
 # ── Index membership ──────────────────────────────────────────

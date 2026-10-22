@@ -137,6 +137,36 @@ def test_build_rows_consensus_falls_back_a_day(monkeypatch):
     assert stats["stale"] == 0 and stats["priced"] == 10
 
 
+def test_build_rows_fills_lagging_session_from_quotes(monkeypatch):
+    # The history carries Oct 15 as its newest close for everyone (Yahoo has
+    # not filled Oct 16 yet); the quotes hold Oct 16's close.
+    lag = make_series([50.0] * 299 + [100.0], end="2026-10-15")
+    syms = [f"S{i}" for i in range(10)]
+    patch(monkeypatch, {s: lag for s in syms})
+    quotes = {s: (101.0, SESSION) for s in syms}
+    _, without = build_rows(stocks(*syms), None, SESSION)
+    rows, stats = build_rows(stocks(*syms), None, SESSION, quotes=quotes)
+    assert without["session"] == pd.Timestamp("2026-10-15")
+    assert stats["session"] == SESSION and stats["priced"] == 10
+    assert all(r["Price"] == 101.0 for r in rows)
+
+
+def test_run_passes_quotes_and_settled_upper(monkeypatch):
+    us = FakeWS()
+    patch_run(monkeypatch, {"H&L US": us})
+    seen = {}
+    monkeypatch.setattr(job.universe, "latest_quotes", lambda m: {"U0": (1.0, SESSION)})
+
+    def spy(sts, members, upper, quotes=None):
+        seen.update(upper=upper, quotes=quotes)
+        return [], {"universe": len(sts), "priced": len(sts), "stale": 0,
+                    "screened": [], "session": SESSION}
+
+    monkeypatch.setattr(job, "build_rows", spy)
+    assert job.run(["US"]) == 0
+    assert seen == {"upper": SESSION, "quotes": {"U0": (1.0, SESSION)}}
+
+
 def test_build_rows_survives_none_download_and_bad_series(monkeypatch):
     monkeypatch.setattr(job.history, "download_batch", lambda syms, period="max": None)
     rows, stats = build_rows(stocks("AAA", "BBB"), None, SESSION)
@@ -190,12 +220,13 @@ def patch_run(monkeypatch, tabs, priced=None, boom=()):
     """Fake everything run() touches. tabs: {tab title: FakeWS}."""
     monkeypatch.setattr(job.sheets, "open_sheet", lambda: object())
     monkeypatch.setattr(job.sheets, "get_or_create_ws", lambda sh, title: tabs[title])
-    monkeypatch.setattr(job.history, "latest_settled_session", lambda m: SESSION)
+    monkeypatch.setattr(job.history, "settled_upper", lambda m: SESSION)
+    monkeypatch.setattr(job.universe, "latest_quotes", lambda m: {})
     monkeypatch.setattr(job.universe, "us_universe", lambda: stocks(*[f"U{i}" for i in range(10)]))
     monkeypatch.setattr(job.universe, "india_universe", lambda: stocks(*[f"I{i}.NS" for i in range(10)]))
     monkeypatch.setattr(job.universe, "index_members", lambda m: set())
 
-    def fake_build(sts, members, ref):
+    def fake_build(sts, members, ref, quotes=None):
         if sts[0].symbol.startswith(boom):
             raise MemoryError("consensus blew up")
         n = len(sts) if priced is None else priced

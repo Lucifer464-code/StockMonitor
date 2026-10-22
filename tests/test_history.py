@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
 
+from zoneinfo import ZoneInfo
+
 from stockmonitor import history
-from stockmonitor.history import download_batch, extract_close, latest_settled_session
+from stockmonitor.history import download_batch, extract_close
 
 
 def full_frame(syms, n=10):
@@ -61,21 +63,6 @@ def test_extract_close_missing_symbol_empty():
     assert extract_close(full_frame(["A", "B"]), "ZZZ", 2).empty
 
 
-def test_latest_settled_session_drops_today_when_open(monkeypatch):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    frozen = datetime(2026, 10, 16, 12, 0, tzinfo=ZoneInfo("America/New_York"))
-    monkeypatch.setattr(history, "_now", lambda tz: frozen.astimezone(ZoneInfo(tz)))
-    today = pd.Timestamp("2026-10-16")
-    idx = pd.DatetimeIndex([today - pd.Timedelta(days=2), today - pd.Timedelta(days=1), today])
-    hist = pd.DataFrame({"Close": [1.0, 2.0, 3.0]}, index=idx)
-    monkeypatch.setattr(history.yf, "download", lambda *a, **k: hist)
-    monkeypatch.setattr(history, "is_market_open", lambda m: True)
-    assert latest_settled_session("US") == today - pd.Timedelta(days=1)
-    monkeypatch.setattr(history, "is_market_open", lambda m: False)
-    assert latest_settled_session("US") == today
-
-
 def _closes(n, with_latest, latest="2026-10-16", prior="2026-10-15"):
     out = {}
     for i in range(n):
@@ -130,19 +117,6 @@ def test_consensus_session_none():
     assert history.consensus_session({}, None) is None
 
 
-def test_latest_settled_session_uses_market_timezone(monkeypatch):
-    # 00:30 IST on Tue Oct 20 is 15:00 Mon Oct 19 in New York: the US session
-    # is still open, so Monday's bar is live and must be excluded.
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    frozen = datetime(2026, 10, 20, 0, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
-    monkeypatch.setattr(history, "_now", lambda tz: frozen.astimezone(ZoneInfo(tz)), raising=False)
-    hist = pd.DataFrame({"Close": [1.0, 2.0]},
-                        index=pd.DatetimeIndex(["2026-10-16", "2026-10-19"]))
-    monkeypatch.setattr(history.yf, "download", lambda *a, **k: hist)
-    assert latest_settled_session("US") == pd.Timestamp("2026-10-16")
-
-
 def _single(sym, n=10, multi=True):
     df = full_frame([sym], n)
     return df if multi else df[sym]
@@ -162,3 +136,55 @@ def test_download_split_one_symbol_chunk_keeps_two_levels(monkeypatch):
         assert out.columns.nlevels == 2, multi
         assert set(out.columns.get_level_values(0)) == set(syms)
         assert not extract_close(out, "S50", 2).empty
+
+
+# ── Settled upper bound and quote fill ───────────────────────
+
+def _freeze(monkeypatch, iso, tz):
+    frozen = pd.Timestamp(iso, tz=tz).to_pydatetime()
+    monkeypatch.setattr(history, "_now", lambda z: frozen.astimezone(ZoneInfo(z)))
+
+
+def test_settled_upper_mid_session_is_previous_day(monkeypatch):
+    _freeze(monkeypatch, "2026-10-21 10:00", "America/New_York")
+    assert history.settled_upper("US") == pd.Timestamp("2026-10-20")
+
+
+def test_settled_upper_after_close_is_today(monkeypatch):
+    _freeze(monkeypatch, "2026-10-21 17:00", "America/New_York")
+    assert history.settled_upper("US") == pd.Timestamp("2026-10-21")
+
+
+def test_settled_upper_before_open_is_today(monkeypatch):
+    # 15:00 IST Thursday = 05:30 ET Thursday: Wednesday's close is settled,
+    # Thursday has no bars yet, so capping at Thursday is safe.
+    _freeze(monkeypatch, "2026-10-22 15:00", "Asia/Kolkata")
+    assert history.settled_upper("US") == pd.Timestamp("2026-10-22")
+
+
+def _three_closes(end="2026-10-20"):
+    return pd.Series([10.0, 11.0, 12.0], index=pd.bdate_range(end=end, periods=3))
+
+
+def test_fill_from_quote_adds_missing_session_close():
+    out = history.fill_from_quote(_three_closes(), (13.5, pd.Timestamp("2026-10-21")),
+                                  upper=pd.Timestamp("2026-10-21"))
+    assert out.index[-1] == pd.Timestamp("2026-10-21") and out.iloc[-1] == 13.5
+    assert len(out) == 4
+
+
+def test_fill_from_quote_never_overwrites_history():
+    s = _three_closes(end="2026-10-21")
+    out = history.fill_from_quote(s, (99.0, pd.Timestamp("2026-10-21")),
+                                  upper=pd.Timestamp("2026-10-21"))
+    assert out.equals(s)
+
+
+def test_fill_from_quote_ignores_unsettled_or_bad_quotes():
+    s = _three_closes()
+    upper = pd.Timestamp("2026-10-20")
+    assert history.fill_from_quote(s, (13.5, pd.Timestamp("2026-10-21")), upper).equals(s)
+    assert history.fill_from_quote(s, None, upper).equals(s)
+    assert history.fill_from_quote(s, (0.0, pd.Timestamp("2026-10-21")),
+                                   pd.Timestamp("2026-10-21")).equals(s)
+    assert history.fill_from_quote(pd.Series(dtype=float), (5.0, upper), upper).empty

@@ -22,12 +22,6 @@ CONSENSUS_WINDOW_DAYS = 30         # calendar days before the reference session 
 
 US_EXCHANGES = ["NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS"]
 
-# Tickers used to resolve the latest settled session.
-SESSION_REFERENCE = {
-    "US": ["SPY", "AAPL", "MSFT"],
-    "IN": ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"],
-}
-
 COLUMNS = [
     "Ticker", "Name", "MarketCap", "Price", "High52", "Low52", "Low52Date",
     "ATH", "FromHigh52", "FromATH", "OffLow52", "R1D", "R1W", "R1M", "R3M",

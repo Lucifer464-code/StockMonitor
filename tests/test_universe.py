@@ -2,6 +2,7 @@ import os
 import pickle
 import time
 
+import pandas as pd
 import pytest
 
 from stockmonitor import config, universe
@@ -254,3 +255,25 @@ def test_india_skips_dummy_symbols(monkeypatch):
     monkeypatch.setattr(universe.yf, "Ticker", spy)
     tickers = {s.ticker for s in india_universe()}
     assert "DUMMYXYZ" not in tickers and "DUMMYXYZ.NS" not in asked
+
+
+# ── Latest quotes (fills a session close the history hasn't caught up on) ──
+
+def test_latest_quotes_gives_price_and_market_date(monkeypatch):
+    # 16:00 ET Oct 21 is 01:30 IST Oct 22: the date must be the market's own.
+    t = int(pd.Timestamp("2026-10-21 16:00", tz="America/New_York").timestamp())
+    rows = [{"symbol": "AAPL", "regularMarketPrice": 345.0, "regularMarketTime": t},
+            {"symbol": "NOPRICE", "regularMarketTime": t},
+            {"symbol": "NOTIME", "regularMarketPrice": 5.0}]
+    monkeypatch.setattr(universe.yf, "screen", lambda query, offset=0, size=250, **k:
+                        {"quotes": rows, "total": 3})
+    quotes = universe.latest_quotes("US")
+    assert quotes == {"AAPL": (345.0, pd.Timestamp("2026-10-21"))}
+
+
+def test_latest_quotes_failure_is_empty(monkeypatch, capsys):
+    def boom(*a, **k):
+        raise RuntimeError("rate limited")
+    monkeypatch.setattr(universe.yf, "screen", boom)
+    assert universe.latest_quotes("IN") == {}
+    assert "quotes unavailable" in capsys.readouterr().out
