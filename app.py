@@ -21,7 +21,7 @@ PAGE_CSS = """<style>
 .stApp{background:#f7f8fa}
 [data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],
 #MainMenu,footer{display:none !important}
-.block-container,[data-testid="stMainBlockContainer"]{padding-top:1.5rem;padding-bottom:3rem;max-width:760px}
+.block-container,[data-testid="stMainBlockContainer"]{padding-top:1.5rem;padding-bottom:3rem;max-width:880px}
 html,body,.stApp{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#0e1726}
 .sm-head{display:flex;justify-content:space-between;align-items:center;font-family:Inter,system-ui,sans-serif}
 .sm-title{font-weight:800;font-size:22px;color:#0e1726;letter-spacing:-.01em}

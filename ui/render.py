@@ -14,12 +14,12 @@ INDEX_LABEL = {"US": "S&P 500", "IN": "NIFTY 500"}
 CURRENCY = {"US": "$", "IN": "₹"}
 
 STYLES = """<style>
-.sm-card{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#0e1726;font-size:13px;background:#fff;border-radius:14px;border:1px solid #e3e7ed;padding:2px 14px}
+.sm-card{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#0e1726;font-size:13px;font-variant-numeric:tabular-nums;background:#fff;border-radius:14px;border:1px solid #e3e7ed;padding:2px 14px}
 .sm-row{border-bottom:1px solid #f1f3f6}
 .sm-row:last-child{border-bottom:none}
 .sm-row summary{list-style:none;display:flex;align-items:center;padding:10px 0;cursor:pointer}
 .sm-row summary::-webkit-details-marker{display:none}
-.sm-row summary:hover{background:#fafbfc}
+.sm-row summary:hover{background:#f4f6f9}
 .sm-chev{width:16px;flex:none;color:#b4bccb;font-size:11px;transition:transform .15s}
 .sm-row[open] .sm-chev{transform:rotate(90deg);color:#00a86b}
 .sm-id{flex:1;min-width:0}
