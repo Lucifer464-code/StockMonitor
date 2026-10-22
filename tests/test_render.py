@@ -47,7 +47,7 @@ def test_returns_strip_has_seven():
 
 def test_fallen_row_shows_5d_and_1m_not_off_low():
     s = _summary(rows_html(_df(), "fallen", "US", SESSION))
-    assert '<span class="sm-key sm-dn">−85.0%</span>' in s
+    assert '<span class="sm-key">15.0%</span>' in s        # % of 52w high (−85% → 15%)
     assert '<span class="sm-num sm-up">+1.1%</span>' in s      # 5D (R1W)
     assert '<span class="sm-num sm-dn">−7.9%</span>' in s      # 1M (R1M)
     assert "+25.0%" not in s and "days ago" not in s
@@ -97,13 +97,26 @@ def test_rows_embed_sparkline_as_image():
 def test_header_spec_per_view():
     labels = {v: [(lab, col) for lab, col, _ in HEADERS[v]] for v in HEADERS}
     assert labels == {
-        "pth": [("Stock", "Ticker"), ("1M trend", None), ("From 52w high", "FromHigh52"),
+        "pth": [("Stock", "Ticker"), ("1M trend", None), ("% of 52w high", "FromHigh52"),
                 ("Price · 1W", "R1W")],
-        "fallen": [("Stock", "Ticker"), ("3M trend", None), ("From 52w high", "FromHigh52"),
+        "fallen": [("Stock", "Ticker"), ("3M trend", None), ("% of 52w high", "FromHigh52"),
                    ("5D", "R1W"), ("1M", "R1M")],
         "ath": [("Stock", "Ticker"), ("1M trend", None), ("From ATH", "FromATH"),
                 ("Price · 1W", "R1W")],
     }
+
+
+def test_pct_of_52w_high_column():
+    def key(view, from_high):
+        s = _summary(rows_html(_df(FromHigh52=from_high), view, "US", SESSION))
+        return s[s.index('<span class="sm-key'):].split("</span>")[0].split(">")[-1]
+    assert key("pth", 0.0) == "100.0%"
+    assert key("pth", -4.1) == "95.9%"
+    assert key("fallen", -15.2) == "84.8%"
+    assert key("pth", float("nan")) == "—"
+    # ATH keeps its distance from the all-time high.
+    s = _summary(rows_html(_df(FromATH=-3.0), "ath", "US", SESSION))
+    assert '<span class="sm-key">−3.0%</span>' in s
 
 
 def test_rows_html_leaves_the_header_to_the_app():

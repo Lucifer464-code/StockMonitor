@@ -96,6 +96,11 @@ def fmt_pct(v: float, signed: bool = True) -> str:
     return "+" + text if signed else text
 
 
+def fmt_of_high(from_high: float) -> str:
+    """Price as a % of the 52-week high, from its % distance below it (−15 → 85.0%)."""
+    return "—" if _nan(from_high) else f"{100.0 + from_high:.1f}%"
+
+
 def fmt_price(v: float, market: str) -> str:
     if _nan(v):
         return "—"
@@ -155,13 +160,13 @@ def _row(r, view: str, market: str, session) -> str:
     spark_pts = list(r["Spark"]) if isinstance(r["Spark"], (list, tuple)) else []
     if view == "fallen":
         spark = _spark_img(sparkline_svg(spark_pts, color=MUTED))
-        key = f'<span class="sm-key sm-dn">{fmt_pct(r["FromHigh52"], signed=False)}</span>'
+        key = f'<span class="sm-key">{fmt_of_high(r["FromHigh52"])}</span>'
         right = "".join(f'<span class="sm-num {_tone(r[c])}">{fmt_pct(r[c])}</span>'
                         for c in ("R1W", "R1M"))
     else:
         spark = _spark_img(sparkline_svg(spark_pts[-config.SPARK_SHORT:]))
-        col = "FromATH" if view == "ath" else "FromHigh52"
-        key = f'<span class="sm-key">{fmt_pct(r[col], signed=False)}</span>'
+        shown = fmt_pct(r["FromATH"], signed=False) if view == "ath" else fmt_of_high(r["FromHigh52"])
+        key = f'<span class="sm-key">{shown}</span>'
         right = (f'<div class="sm-right">{e(fmt_price(r["Price"], market))}'
                  f'<div class="sm-sub {_tone(r["R1W"])}">{fmt_pct(r["R1W"])} 1W</div></div>')
 
@@ -198,9 +203,9 @@ def _row(r, view: str, market: str, session) -> str:
 # app.py draws these as the sortable header; the widths match the row cells.
 HEADERS = {
     "pth": [("Stock", "Ticker", "sm-h-id"), ("1M trend", None, "sm-h-spark"),
-            ("From 52w high", "FromHigh52", "sm-key"), ("Price · 1W", "R1W", "sm-right")],
+            ("% of 52w high", "FromHigh52", "sm-key"), ("Price · 1W", "R1W", "sm-right")],
     "fallen": [("Stock", "Ticker", "sm-h-id"), ("3M trend", None, "sm-h-spark"),
-               ("From 52w high", "FromHigh52", "sm-key"), ("5D", "R1W", "sm-num"),
+               ("% of 52w high", "FromHigh52", "sm-key"), ("5D", "R1W", "sm-num"),
                ("1M", "R1M", "sm-num")],
     "ath": [("Stock", "Ticker", "sm-h-id"), ("1M trend", None, "sm-h-spark"),
             ("From ATH", "FromATH", "sm-key"), ("Price · 1W", "R1W", "sm-right")],
